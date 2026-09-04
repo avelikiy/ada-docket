@@ -298,6 +298,7 @@ DISCLAIMER = """This is a mirror of federal court dockets, published for researc
        contain errors — verify against the linked docket before relying on anything
        here."""
 
+
 def page(
     *,
     title: str,
@@ -360,7 +361,8 @@ def page(
     <p><a href="{depth}index.html">The whole record</a> ·
        <a href="{depth}cases.csv">CSV</a> ·
        <a href="{depth}cases.json">JSON</a> ·
-       <a href="{depth}feed.xml">RSS</a></p>
+       <a href="{depth}feed.xml">RSS</a> ·
+       <a href="{depth}pulse.html">Pulse</a></p>
   </div>
 </footer>
 
@@ -596,6 +598,210 @@ def court_page(court_id: str, rows: list[dict]) -> str:
     )
 
 
+def load_pulse() -> list[dict]:
+    """Daily readings written by scripts/pulse.py, oldest first."""
+    path = os.path.join(DATA_DIR, "pulse.ndjson")
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    continue
+    out.sort(key=lambda r: r.get("date", ""))
+    return out
+
+
+# What the ledger shows, and — the point of the page — what it cannot.
+# (key, label, how it is read, gloss). A key of None is a line we promised
+# ourselves we would watch and then found we had no way to see.
+LEDGER = [
+    (
+        "subscribers",
+        "Feed subscribers",
+        "Feedly's public count for this feed, no account needed.",
+        "Counts Feedly's readers only, so the real figure is this or higher, "
+        "never lower.",
+    ),
+    (
+        "stars",
+        "Repository stars",
+        "github.com, public.",
+        "Kept for completeness. We measured in cycle three that GitHub is not a "
+        "discovery channel, and nothing here is expected to move.",
+    ),
+    (
+        "repo_uniques_14d",
+        "Repository visitors",
+        "GitHub's traffic API, rolling fourteen days.",
+        "Visitors to the repository page. Not readers of this site — GitHub "
+        "reports nothing about Pages traffic.",
+    ),
+    (
+        None,
+        "Readers of this site",
+        "Nothing reports it.",
+        "A static site on github.io writes no logs, and GitHub publishes no "
+        "traffic figures for Pages. Measuring it would take a server, a paid "
+        "analytics account, or a Search Console sign-in. This project has none "
+        "of the three, so the line stays empty rather than guessed at.",
+    ),
+    (
+        None,
+        "Search impressions",
+        "Nothing reports it.",
+        "Same gap. Search Console would answer it and needs a person to verify "
+        "the property once.",
+    ),
+]
+
+
+def pulse_page(rows: list[dict], readings: list[dict]) -> str:
+    """The project's own scoreboard, including the half of it we cannot see.
+
+    This project set a closing condition before it launched — fewer than fifty
+    subscribers or fewer than a hundred and twenty unique readers at ninety days
+    and it shuts down — and only afterwards checked whether either number could
+    be read. One cannot. Publishing that, rather than quietly redefining the
+    threshold later, is the whole reason this page exists.
+    """
+    latest = readings[-1] if readings else {}
+    first = readings[0] if readings else {}
+
+    def shown(key: str) -> str:
+        value = latest.get(key)
+        return "—" if value is None else f"{value:,}"
+
+    started = first.get("date") or dt.date.today().isoformat()
+    day = 0
+    try:
+        day = (dt.date.today() - dt.date.fromisoformat(started)).days
+    except ValueError:
+        pass
+
+    def entry(key, name, how, gloss) -> str:
+        # A readable line carries its figure. An unreadable one carries ruled
+        # blank paper, which states the gap before the sentence under it does.
+        value = (
+            f'<p class="led-value">{shown(key)}</p>'
+            if key
+            else '<p class="led-value led-void"><span class="sr-only">no reading</span></p>'
+        )
+        return f"""      <div class="led{"" if key else " led-blank"}">
+        <p class="led-name">{html.escape(name)}</p>
+        {value}
+        <p class="led-how">{html.escape(how)}</p>
+        <p class="led-gloss">{html.escape(gloss)}</p>
+      </div>"""
+
+    observed = "\n".join(entry(*e) for e in LEDGER if e[0])
+    unobserved = "\n".join(entry(*e) for e in LEDGER if not e[0])
+
+    history = ""
+    if readings:
+        head = "".join(
+            f"<th>{html.escape(label)}</th>"
+            for label in (
+                "Date",
+                "Subscribers",
+                "Stars",
+                "Repo visitors",
+                "Filings",
+                "Pages",
+            )
+        )
+        body_rows = "\n".join(
+            f'<tr><td class="c-date">{html.escape(r.get("date", ""))}</td>'
+            + "".join(
+                f'<td class="c-no">{"—" if r.get(k) is None else format(r[k], ",")}</td>'
+                for k in ("subscribers", "stars", "repo_uniques_14d", "cases", "pages")
+            )
+            + "</tr>"
+            for r in reversed(readings)
+        )
+        history = f"""
+  <section class="wrap">
+    <h2>Every reading</h2>
+    <p>One row a day, written by the same job that fetches the filings. The
+       record of what we watched is public for the same reason the filings
+       are.</p>
+    <div class="scroller">
+      <table>
+        <thead><tr>{head}</tr></thead>
+        <tbody>
+{body_rows}
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Raw readings: <a href="pulse.ndjson">pulse.ndjson</a>.</p>
+  </section>"""
+
+    body = f"""
+  <section class="wrap">
+    <div class="stats">
+      <div class="stat"><b>{shown("subscribers")}</b><span>feed subscribers</span></div>
+      <div class="stat"><b>—</b><span>readers of this site</span></div>
+      <div class="stat"><b>{day}</b><span>days since the first reading</span></div>
+      <div class="stat"><b>{len(rows):,}</b><span>filings on the record</span></div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2>The closing condition</h2>
+    <p>Fewer than fifty subscribers, or fewer than a hundred and twenty unique
+       readers, ninety days after launch, and this project closes. That was
+       written down before launch so it could not be softened afterwards to suit
+       whatever the numbers turned out to be.</p>
+    <p>Half of it cannot be evaluated. Unique readers are not observable from a
+       static site at no cost, which we established only after setting the
+       condition. The subscriber half stands and is read below. The reader half
+       is void, and calling it void is more useful than substituting a number
+       that looks like it but is not.</p>
+  </section>
+
+  <section class="wrap">
+    <h2>What is observed</h2>
+    <p>Each of these is free, needs no account, and is recorded once a day by
+       the same job that fetches the filings.</p>
+    <div class="ledger">
+{observed}
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2>What nothing reports</h2>
+    <p>These are the figures the project wanted and cannot have. They are ruled
+       and left blank rather than filled with a proxy, because a proxy in this
+       column is how a closing condition quietly stops meaning anything.</p>
+    <div class="ledger ledger-void">
+{unobserved}
+    </div>
+  </section>
+{history}
+"""
+    return page(
+        title="Pulse — how this record is doing, and what it cannot see",
+        description=(
+            "Daily readings for the ADA Title III filings record: feed "
+            "subscribers, repository signals, corpus size — and an explicit "
+            "account of the figures a static site cannot measure."
+        ),
+        depth="",
+        heading="Pulse",
+        standfirst=(
+            "What this project can measure about itself, what it cannot, and the "
+            "condition under which it closes."
+        ),
+        crumb='<a href="index.html">The record</a> · Pulse',
+        canonical="pulse.html",
+        body=body,
+    )
+
+
 def month_page(ym: str, rows: list[dict], order: list[str]) -> str:
     courts = collections.Counter(
         (court_of(r), r.get("court_id") or "unknown") for r in rows
@@ -774,6 +980,26 @@ tr[hidden] { display:none; }
 .downloads { list-style:none; padding:0; margin:.5rem 0 0; }
 .downloads li { padding:.35rem 0; border-bottom:1px solid rgba(185,188,178,.5);
                 font-size:.95rem; }
+/* The pulse ledger. Entries we can read are written on the line; entries
+   nothing reports are left as ruled paper with nothing on it, which says the
+   thing faster than the sentence underneath does. */
+.ledger { display:grid; grid-template-columns:repeat(auto-fit,minmax(19rem,1fr));
+          gap:0 2.5rem; border-top:1px solid var(--ink); }
+.led { padding:1.1rem 0 1.2rem; border-bottom:1px solid var(--rule); }
+.led p { margin:0; }
+.led-name { font-size:1rem; }
+.led-value { font-family:var(--mono); font-size:1.55rem; letter-spacing:-.03em;
+             color:var(--seal); margin:.15rem 0 .5rem !important; }
+.led-how { font-style:italic; color:var(--ink-soft); font-size:.9rem;
+           margin-bottom:.35rem !important; }
+.led-gloss { color:var(--ink-soft); font-size:.85rem; max-width:34rem; }
+.ledger-void { grid-template-columns:repeat(auto-fit,minmax(22rem,1fr)); }
+/* Four ruled lines with nothing written on them. The blank is the statement;
+   the paragraph underneath only explains it. */
+.led-void { height:4.6rem; margin:.35rem 0 .75rem !important;
+  background:repeating-linear-gradient(
+    to bottom, transparent 0 1.09rem, var(--rule) 1.09rem 1.15rem); }
+
 footer { border-top:1px solid var(--ink); padding:1.5rem 0 3rem; color:var(--ink-soft);
          font-size:.85rem; }
 footer p { margin:0 0 .4rem; max-width:46rem; }
@@ -922,7 +1148,7 @@ def main() -> int:
         fh.write(FILTER_JS)
     with open(os.path.join(SITE, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(index_page(rows))
-    paths = ["index.html"]
+    paths = ["index.html", "pulse.html"]
 
     by_court: dict[str, list[dict]] = {}
     for r in rows:
@@ -950,6 +1176,22 @@ def main() -> int:
         ) as fh:
             fh.write(month_page(ym, by_month[ym], order))
         paths.append(f"month/{ym}.html")
+
+    # The project's own scoreboard, published on the same terms as the filings.
+    # Written last so the corpus figures it reports are this build's, not the
+    # previous one's — pulse.py runs before the build and cannot know them, and
+    # a page that disagrees with its own table teaches readers to distrust both.
+    readings = load_pulse()
+    today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    for reading in readings:
+        if reading.get("date") == today:
+            reading["cases"], reading["pages"] = len(rows), len(paths)
+    with open(os.path.join(SITE, "pulse.html"), "w", encoding="utf-8") as fh:
+        fh.write(pulse_page(rows, readings))
+    if readings:
+        with open(os.path.join(SITE, "pulse.ndjson"), "w", encoding="utf-8") as fh:
+            for reading in readings:
+                fh.write(json.dumps(reading, ensure_ascii=False, sort_keys=True) + "\n")
 
     write_data_files(rows)
     write_feed(rows)

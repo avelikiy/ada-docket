@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. `make schedule` substitutes __REPO__ and installs the result at
+  ~/Library/LaunchAgents/com.ada-docket.daily.plist; `make unschedule` removes
+  it. Nothing outside that one file is touched, and removing it is the whole
+  uninstall.
+
+  Runs as a LaunchAgent in the logged-in user's session, not as a daemon, so the
+  run reaches the keychain that holds the git credentials. A daemon would not,
+  and would fail at the push every night.
+
+  11:20 UTC matches the schedule the GitHub workflow asked for: late enough that
+  the overnight PACER-to-RECAP indexing has settled, and off the hour. Given as
+  local time here because launchd's calendar interval is local — adjust the hour
+  if the machine moves timezone and the run time matters to you.
+
+  RunAtLoad is deliberately false: installing the schedule should not kick off a
+  fetch, and `make daily` is right there for an immediate run.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ada-docket.daily</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/scripts/daily.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>7</integer>
+    <key>Minute</key><integer>20</integer>
+  </dict>
+
+  <!-- A laptop asleep at 07:20 misses the slot outright; launchd only catches
+       up a missed calendar interval on wake for some configurations, so this is
+       the known weak point of running the schedule on a personal machine rather
+       than on a server. It is recorded in the runbook, not papered over. -->
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__REPO__/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO__/logs/launchd.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
