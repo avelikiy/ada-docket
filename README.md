@@ -197,7 +197,22 @@ moment.
 
 Requests run unauthenticated against CourtListener's public API. That is inside
 the documented limits for the daily job — about four requests against a ceiling
-of 125 a day — but a backfill is throttled hard, and Free Law Project asks
-anyone building a product on the API to arrange a commercial agreement first.
-Registering an API token, and opening that conversation before any paid use, is
-outstanding.
+of 125 a day — but a backfill is throttled hard: 5 a minute, 50 an hour, and the
+hourly one is what actually bites.
+
+The code side is now done. Drop a token into `.courtlistener-token` (see
+`.courtlistener-token.example`) and the ceilings lift:
+
+|         | anonymous   | with a token |
+|---------|-------------|--------------|
+| per run | 81 requests | 600 requests |
+| per day | 105 usable  | 1980 usable  |
+
+The remaining twelve-month hole needs about 350 requests — four consecutive
+nights of the schedule firing, or one run. Registering is free and takes a
+minute; the file explains where.
+
+Free Law Project asks anyone building a product on the API to arrange a
+commercial agreement first. This project is free, public, and credits
+CourtListener on every row, which is not the same as having asked. If it is
+ever monetised, that conversation happens first.
