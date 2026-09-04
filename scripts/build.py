@@ -43,6 +43,25 @@ SITE = os.path.join(ROOT, "site")
 # Set by the workflow so the feed and sitemap carry absolute URLs.
 BASE_URL = os.environ.get("SITE_URL", "").rstrip("/")
 
+
+def canonical_url(path: str) -> str:
+    """The single absolute URL a page claims as its own. "" when unknown.
+
+    The homepage is served at both /ada-docket/ and /ada-docket/index.html and
+    is the same document either way. Every link on the site points at the
+    directory form, so that is the spelling advertised — while the sitemap
+    named the file form and the homepage carried no canonical tag at all,
+    leaving a search engine to choose between two URLs for the one page the
+    project's whole distribution rests on.
+
+    Both the tag and the sitemap now come through here, so they cannot drift
+    apart again.
+    """
+    if not BASE_URL or not path:
+        return ""
+    return BASE_URL + "/" + ("" if path == "index.html" else path)
+
+
 CL = "https://www.courtlistener.com"
 REPO = os.environ.get("REPO_URL", "https://github.com/avelikiy/ada-docket").rstrip("/")
 
@@ -405,8 +424,8 @@ def page(
                 f"current to that date and no later.</p>"
             )
     link_canonical = (
-        f'\n<link rel="canonical" href="{html.escape(BASE_URL + "/" + canonical)}">'
-        if BASE_URL and canonical
+        f'\n<link rel="canonical" href="{html.escape(canonical_url(canonical))}">'
+        if canonical_url(canonical)
         else ""
     )
     return f"""<!doctype html>
@@ -679,7 +698,7 @@ def index_page(
             "Free CSV, JSON and RSS, no account."
         ),
         depth="",
-        canonical="",
+        canonical="index.html",
         heading="The federal access docket, every day",
         standfirst=(
             f"{len(rows):,} filings tracked across {len(courts)} district courts, "
@@ -1705,7 +1724,7 @@ def write_sitemap(paths: list[str]) -> None:
     today = dt.date.today().isoformat()
     if BASE_URL:
         urls = "".join(
-            f"\n  <url><loc>{html.escape(BASE_URL + '/' + p)}</loc>"
+            f"\n  <url><loc>{html.escape(canonical_url(p))}</loc>"
             f"<lastmod>{today}</lastmod></url>"
             for p in paths
         )
