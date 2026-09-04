@@ -45,8 +45,15 @@ April 2025 was published as "25 filings, 0.8 a day" on that basis; the index
 reports about 409. Weeks we have not collected now draw as ruled columns rather
 than as noughts, for the same reason.
 
-`make coverage` measures it, `make plan` says what the backfill would do next,
-and the daily run does both without being asked.
+`make status` prints what we hold and spends nothing, `make coverage`
+re-measures it against the court index at about one request a month, `make
+plan` says what the backfill would do next, and the daily run does the
+measuring and the repairing without being asked.
+
+Reach for `make status` first. Re-measuring costs twenty-one of the day's
+hundred and twenty-five requests, and a check that expensive is a check that
+gets skipped — which is how a truncated April got published as a whole month
+in the first place.
 
 ### What it does not cover
 
