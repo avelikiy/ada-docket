@@ -187,12 +187,26 @@ def partition(row: dict) -> str:
     return d[:7] if len(d) >= 7 and d[4] == "-" else "unknown"
 
 
+# Files in data/ that hold filings. `save()` writes YYYY-MM.ndjson and, for a
+# row with no usable filing date, unknown.ndjson — nothing else. Readers used to
+# take any *.ndjson in the directory instead, which is how pulse.ndjson came to
+# be read as dockets: the fetch asked a readings row for its docket_id and died,
+# the site published regardless, and a record that promises to be daily quietly
+# stopped being one. Moving that file out fixed the instance; matching the name
+# on the way in is what closes the class.
+_PARTITION = re.compile(r"^(\d{4}-\d{2}|unknown)\.ndjson$")
+
+
+def is_partition(name: str) -> bool:
+    return bool(_PARTITION.match(name))
+
+
 def load() -> dict[int, dict]:
     seen: dict[int, dict] = {}
     if not os.path.isdir(DATA_DIR):
         return seen
     for name in sorted(os.listdir(DATA_DIR)):
-        if not name.endswith(".ndjson"):
+        if not is_partition(name):
             continue
         with open(os.path.join(DATA_DIR, name), encoding="utf-8") as fh:
             for line in fh:

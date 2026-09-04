@@ -32,6 +32,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import fetch  # noqa: E402  (partition-name invariant, shared with the fetcher)
+
 import coverage as cov  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -94,7 +96,9 @@ def load() -> list[dict]:
     """Read every monthly partition in data/ into one list, newest first."""
     rows = []
     for name in sorted(os.listdir(DATA_DIR)):
-        if not name.endswith(".ndjson"):
+        # Only real partitions. Reading any *.ndjson here is what let a file of
+        # daily readings be counted as one extra filing on every page.
+        if not fetch.is_partition(name):
             continue
         with open(os.path.join(DATA_DIR, name), encoding="utf-8") as fh:
             for line in fh:
@@ -1723,7 +1727,7 @@ def write_sitemap(paths: list[str]) -> None:
 
 def main() -> int:
     if not os.path.isdir(DATA_DIR) or not any(
-        n.endswith(".ndjson") for n in os.listdir(DATA_DIR)
+        fetch.is_partition(n) for n in os.listdir(DATA_DIR)
     ):
         print(f"no data in {DATA_DIR}; run scripts/fetch.py first", file=sys.stderr)
         return 1

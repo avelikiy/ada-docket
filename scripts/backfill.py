@@ -66,7 +66,11 @@ def data_months() -> list[str]:
     return sorted(
         os.path.basename(p)[:-7]
         for p in glob.glob(os.path.join(fetch.DATA_DIR, "*.ndjson"))
-        if os.path.basename(p)[:-7] != "unknown"
+        # Name-matched, not merely suffix-matched. Slicing seven characters off
+        # any *.ndjson turned pulse.ndjson into a month called "pulse", which
+        # the audit would then spend a request asking the source about.
+        if fetch.is_partition(os.path.basename(p))
+        and os.path.basename(p)[:-7] != "unknown"
     )
 
 
