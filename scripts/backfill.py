@@ -50,15 +50,28 @@ import fetch  # noqa: E402
 # request of the day on a backfill page leaves tomorrow's filings unfetched —
 # the record would stop being daily in order to become complete, which is the
 # wrong trade for a site whose entire claim is that it is current.
-DAILY_CEILING = 125
+DAILY_CEILING_ANON = 125
+
+# With a token the daily allowance is far larger. As with the hourly figure in
+# fetch.py this does not chase the maximum: enough to close the twelve-month
+# hole in a single run is the whole requirement, and over-reaching against a
+# free service run by a non-profit would be the wrong kind of clever.
+DAILY_CEILING_TOKEN = 2000
+
 RESERVED_FOR_DAILY_FETCH = 20
+
+
+def daily_ceiling() -> int:
+    return DAILY_CEILING_TOKEN if fetch.read_token() else DAILY_CEILING_ANON
+
 
 # The hourly ceiling, not the daily one, sets how long a run takes: 45 requests
 # an hour means the full daily allowance would keep the job running for well
 # over two hours. Two hours' worth is the cap, so a nightly run finishes in a
 # predictable window and the rest waits for tomorrow. Nothing is lost by
 # stopping — that is what the coverage record is for.
-PER_RUN_MAX = 2 * fetch.HOURLY_MAX
+def per_run_max() -> int:
+    return 2 * fetch.hourly_max()
 
 
 def data_months() -> list[str]:
@@ -260,8 +273,8 @@ def main() -> int:
     all_months = sorted(set(known) | set(gap))
 
     already = spent_today(doc, today.isoformat())
-    allowance = DAILY_CEILING - RESERVED_FOR_DAILY_FETCH - already
-    budget = args.budget if args.budget is not None else min(allowance, PER_RUN_MAX)
+    allowance = daily_ceiling() - RESERVED_FOR_DAILY_FETCH - already
+    budget = args.budget if args.budget is not None else min(allowance, per_run_max())
     budget = max(0, budget)
 
     print(f"ada-docket backfill · {today}")
@@ -269,8 +282,9 @@ def main() -> int:
     print(
         f"  months missing   {len(gap)}" + (f"  ({gap[0]} .. {gap[-1]})" if gap else "")
     )
-    print(f"  spent today      {already}/{DAILY_CEILING - RESERVED_FOR_DAILY_FETCH}")
-    print(f"  budget this run  {budget} (about {budget / fetch.HOURLY_MAX:.1f} h)")
+    print(f"  spent today      {already}/{daily_ceiling() - RESERVED_FOR_DAILY_FETCH}"
+          f"{'  (authenticated)' if fetch.read_token() else ''}")
+    print(f"  budget this run  {budget} (about {budget / fetch.hourly_max():.1f} h)")
 
     if args.plan:
         needs = coverage.months_needing_work(doc, all_months, today)

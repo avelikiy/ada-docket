@@ -1,0 +1,53 @@
+# Copy this file to `.courtlistener-token` and put your token in it.
+# That filename is gitignored. This repository is public — the token must
+# never be committed, and it is sent as a header, never in a URL.
+#
+# Lines starting with # are ignored, so this file as-is does nothing.
+#
+# ---------------------------------------------------------------------------
+# WHAT IT BUYS
+#
+# Anonymous, CourtListener allows 5 requests a minute, 50 an hour, 125 a day.
+# That ceiling is the single constraint that has shaped this project most:
+#
+#   - it truncated April 2025 into a one-day month that was then published as
+#     a complete one;
+#   - closing the remaining twelve-month hole anonymously takes about four
+#     consecutive nights, each depending on this laptop being awake at 07:20.
+#
+# With a token the same job runs in one sitting:
+#
+#            anonymous          with a token
+#   per run  81 requests        600 requests
+#   per day  105 usable         1980 usable
+#
+# The hole needs roughly 350. So: four nights and a lot of luck, or one run.
+# ---------------------------------------------------------------------------
+#
+# HOW:
+#
+#   1. Register at https://www.courtlistener.com/sign-in/  (free)
+#   2. Open https://www.courtlistener.com/profile/api/ and copy the token
+#   3. cp .courtlistener-token.example .courtlistener-token
+#      and paste it below the comments in that copy
+#   4. make backfill
+#
+# You can paste the bare token, "Token abc123", or the whole
+# "Authorization: Token abc123" line — all three are accepted.
+#
+# Alternatively, export COURTLISTENER_TOKEN in the environment; that wins over
+# the file. Note that launchd hands scheduled runs almost no environment, so
+# the file is the one that keeps working on the daily schedule.
+#
+# ---------------------------------------------------------------------------
+# ONE OBLIGATION, NOT OPTIONAL
+#
+# Free Law Project is a non-profit and asks anyone building a product on the
+# API to arrange a commercial agreement first. This project is free, public
+# and credits CourtListener on every row, which is not the same as having
+# asked. If ada-docket is ever monetised, that conversation happens before,
+# not after: https://free.law/contact/
+#
+# The ceilings above are also deliberately conservative rather than maximal.
+# Hammering a free public service because you technically can is how the
+# ceiling gets lowered for everyone.

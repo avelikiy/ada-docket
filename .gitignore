@@ -8,3 +8,6 @@ __pycache__/
 # Rolling record of API request times, used to honour the hourly rate ceiling
 # across processes. Local pacing state, not part of the record.
 data/.requests
+
+# CourtListener API token. A secret, and this repository is public.
+.courtlistener-token

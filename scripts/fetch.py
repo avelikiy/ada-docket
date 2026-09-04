@@ -39,7 +39,60 @@ PAGE_PAUSE = 13.0
 
 # Requests allowed per rolling hour, against a documented fifty. The margin
 # covers the daily fetch running alongside a backfill.
-HOURLY_MAX = 45
+HOURLY_MAX_ANON = 45
+
+# With a token the ceiling is far higher, but this deliberately does not chase
+# the maximum. The published anonymous figures are exact; the authenticated
+# ones are not something to hard-code from memory, and being wrong upward here
+# means hammering a free public service run by a non-profit. A few hundred an
+# hour turns the twelve-month hole from four nights into one run, which is the
+# entire point, and the 429 backoff remains the real authority either way.
+HOURLY_MAX_TOKEN = 300
+
+# Kept as a name because the rest of the file and the tests read it as "the
+# anonymous ceiling"; call hourly_max() for the figure actually in force.
+HOURLY_MAX = HOURLY_MAX_ANON
+
+# A secret, in a public repository. Read from a gitignored file or the
+# environment, sent as a header, and never placed in a URL — a token in a query
+# string ends up in server logs, in referrers, and eventually in a screenshot.
+TOKEN_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".courtlistener-token"
+)
+
+
+def read_token() -> str | None:
+    """The API token, or None. Absent is the supported, ordinary case."""
+    env = os.environ.get("COURTLISTENER_TOKEN", "").strip()
+    raw = env
+    if not raw:
+        try:
+            with open(TOKEN_PATH, encoding="utf-8") as fh:
+                lines = [ln.strip() for ln in fh]
+        except OSError:
+            return None
+        candidates = [ln for ln in lines if ln and not ln.startswith("#")]
+        raw = candidates[0] if candidates else ""
+
+    if not raw:
+        return None
+    # People paste what the documentation showed them.
+    raw = re.sub(r"^Authorization:\s*", "", raw, flags=re.I).strip()
+    raw = re.sub(r"^Token\s+", "", raw, flags=re.I).strip()
+    return raw or None
+
+
+def request_headers() -> dict[str, str]:
+    headers = {"User-Agent": UA}
+    token = read_token()
+    if token:
+        headers["Authorization"] = f"Token {token}"
+    return headers
+
+
+def hourly_max() -> int:
+    return HOURLY_MAX_TOKEN if read_token() else HOURLY_MAX_ANON
+
 
 # The window has to outlive the process. The daily loop runs the fetch and the
 # backfill as two separate programs within a minute of each other, and a limiter
@@ -67,9 +120,10 @@ def _await_slot() -> None:
     the audit and the crawl draw on the same allowance, and pacing each of them
     correctly on its own would still breach the limit together.
     """
+    ceiling = hourly_max()
     while True:
         stamps = _read_window()
-        if len(stamps) < HOURLY_MAX:
+        if len(stamps) < ceiling:
             stamps.append(time.time())
             try:
                 os.makedirs(os.path.dirname(_WINDOW_PATH), exist_ok=True)
@@ -80,7 +134,7 @@ def _await_slot() -> None:
             return
         wait = 3600 - (time.time() - min(stamps)) + 1
         print(
-            f"  hourly ceiling reached ({HOURLY_MAX}/h); waiting {wait / 60:.0f} min",
+            f"  hourly ceiling reached ({ceiling}/h); waiting {wait / 60:.0f} min",
             file=sys.stderr,
             flush=True,
         )
@@ -150,7 +204,7 @@ def get(url: str, tries: int = 5) -> dict:
     for attempt in range(tries):
         _await_slot()
         REQUESTS += 1
-        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        req = urllib.request.Request(url, headers=request_headers())
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read().decode("utf-8"))
