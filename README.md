@@ -132,8 +132,8 @@ repository can fix it.
 So the schedule runs locally instead:
 
 ```sh
-make schedule          # install one launchd agent, daily at 07:20 local
-make schedule-status   # is it installed and loaded?
+make schedule          # install one launchd agent, anchored at 11:20 UTC
+make schedule-status   # installed, loaded, and still on the anchor?
 make unschedule        # remove it — this is the entire uninstall
 ```
 
@@ -142,7 +142,28 @@ make unschedule        # remove it — this is the entire uninstall
 It runs as a user agent rather than a daemon so the job can reach the keychain
 holding the git credentials.
 
-**The weak point, stated plainly:** a laptop asleep at 07:20 misses that day
+**The hour is computed, not typed.** The anchor is 11:20 UTC, chosen because the
+overnight PACER-to-RECAP indexing has settled by then — a fact about
+CourtListener's servers, not about our clock. launchd reads
+`StartCalendarInterval` as *local* time and offers no field for a zone, so
+`make schedule` converts the anchor at install time and `make schedule-status`
+re-derives it from the installed file:
+
+```
+schedule  13:20 CEST  =  11:20 UTC  (anchor 11:20 UTC)
+drift     none — the run lands on the anchor
+```
+
+This is not decoration. The template previously carried a literal `Hour 7` under
+a comment asserting it meant 11:20 UTC; on this machine that fired at **05:20
+UTC — six hours ahead of the indexing the anchor exists to wait for**, and the
+file contradicted its own comment for a full cycle without anything failing. A
+bare hour is unfalsifiable without a zone beside it, so there is no longer a
+bare hour to read. `schedule-status` exits non-zero when the two have drifted,
+which is also what a DST boundary looks like: re-run `make schedule` to correct
+it.
+
+**The weak point, stated plainly:** a laptop asleep at the slot misses that day
 outright. This is worse than a hosted scheduler and better than a site that
 promises a daily record and quietly stops. Runs append to `logs/daily-YYYY-MM.log`;
 each stage reports its own outcome, and a build failure stops the run before it

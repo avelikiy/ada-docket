@@ -2,19 +2,30 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Template. `make schedule` substitutes __REPO__ and installs the result at
-  ~/Library/LaunchAgents/com.ada-docket.daily.plist; `make unschedule` removes
-  it. Nothing outside that one file is touched, and removing it is the whole
-  uninstall.
+  Template. `make schedule` substitutes __REPO__, __HOUR__ and __MINUTE__ and
+  installs the result at ~/Library/LaunchAgents/com.ada-docket.daily.plist;
+  `make unschedule` removes it. Nothing outside that one file is touched, and
+  removing it is the whole uninstall.
 
   Runs as a LaunchAgent in the logged-in user's session, not as a daemon, so the
   run reaches the keychain that holds the git credentials. A daemon would not,
   and would fail at the push every night.
 
-  11:20 UTC matches the schedule the GitHub workflow asked for: late enough that
-  the overnight PACER-to-RECAP indexing has settled, and off the hour. Given as
-  local time here because launchd's calendar interval is local — adjust the hour
-  if the machine moves timezone and the run time matters to you.
+  THE HOUR IS NOT TYPED HERE, AND MUST NOT BE. The schedule is anchored at
+  11:20 UTC — late enough that the overnight PACER-to-RECAP indexing has
+  settled, and off the hour. But launchd reads StartCalendarInterval in the
+  machine's LOCAL time and offers no field for a zone, so the anchor has to be
+  converted at install time by scripts/schedule.py.
+
+  Typing it by hand is how this broke: the template once carried a literal
+  `Hour 7` under a comment claiming it meant 11:20 UTC. On a CEST machine that
+  is 05:20 UTC — six hours early, ahead of the very indexing the anchor waits
+  for — and the file and its own comment disagreed for a full cycle, because a
+  bare number tells you nothing without the zone beside it.
+
+  `make schedule-status` re-derives the UTC time from whatever is installed and
+  reports drift, so a timezone move or a DST boundary shows up as a line of
+  output rather than as a quiet fetch of a day that has not been indexed yet.
 
   RunAtLoad is deliberately false: installing the schedule should not kick off a
   fetch, and `make daily` is right there for an immediate run.
@@ -33,15 +44,17 @@
   <key>WorkingDirectory</key>
   <string>__REPO__</string>
 
+  <!-- Generated from the 11:20 UTC anchor. Do not edit by hand; re-run
+       `make schedule` instead, which is also the DST fix. -->
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Hour</key><integer>7</integer>
-    <key>Minute</key><integer>20</integer>
+    <key>Hour</key><integer>__HOUR__</integer>
+    <key>Minute</key><integer>__MINUTE__</integer>
   </dict>
 
-  <!-- A laptop asleep at 07:20 misses the slot outright; launchd only catches
-       up a missed calendar interval on wake for some configurations, so this is
-       the known weak point of running the schedule on a personal machine rather
+  <!-- A laptop asleep at the slot misses it outright; launchd only catches up a
+       missed calendar interval on wake for some configurations, so this is the
+       known weak point of running the schedule on a personal machine rather
        than on a server. It is recorded in the runbook, not papered over. -->
 
   <key>RunAtLoad</key>

@@ -42,12 +42,23 @@ daily:             ## the whole loop: fetch, measure, render, commit, publish
 # exactly one file and `unschedule` deletes it; nothing else on the machine is
 # touched. A laptop asleep at the scheduled minute misses that day, which is the
 # honest cost of not having a server.
+# The hour is computed from the 11:20 UTC anchor, never typed: launchd reads
+# StartCalendarInterval as local time and has no zone field, so a literal hour
+# means a different moment on every machine. It meant 05:20 UTC on this one --
+# six hours ahead of the indexing the anchor exists to wait for -- while the
+# comment beside it claimed 11:20. See scripts/schedule.py.
 schedule:          ## install the local daily schedule (one file, reversible)
 	@mkdir -p "$(HOME)/Library/LaunchAgents" logs
-	@sed 's|__REPO__|$(REPO_DIR)|g' scripts/launchd.plist.in > "$(PLIST)"
+	@set -e; \
+	  slot=$$(python3 scripts/schedule.py --emit-local); \
+	  hour=$${slot% *}; minute=$${slot#* }; \
+	  sed -e 's|__REPO__|$(REPO_DIR)|g' \
+	      -e "s|__HOUR__|$$hour|g" \
+	      -e "s|__MINUTE__|$$minute|g" \
+	      scripts/launchd.plist.in > "$(PLIST)"
 	@launchctl bootout "gui/$$(id -u)/$(LABEL)" 2>/dev/null || true
 	@launchctl bootstrap "gui/$$(id -u)" "$(PLIST)"
-	@echo "scheduled daily at 07:20 local — $(PLIST)"
+	@python3 scripts/schedule.py --check "$(PLIST)"
 	@echo "remove it with: make unschedule"
 
 unschedule:        ## remove the local daily schedule
@@ -55,11 +66,15 @@ unschedule:        ## remove the local daily schedule
 	@rm -f "$(PLIST)"
 	@echo "unscheduled; $(PLIST) removed"
 
-schedule-status:   ## is the local schedule installed and loaded?
-	@test -f "$(PLIST)" && echo "plist   present" || echo "plist   absent"
+# Reports the UTC moment the installed file will actually fire at, re-derived
+# rather than recalled, so a timezone move or a DST boundary is a line of output
+# instead of a silent early fetch. Exits non-zero when it has drifted.
+schedule-status:   ## is the local schedule installed, loaded, and on the anchor?
+	@test -f "$(PLIST)" && echo "plist     present" || echo "plist     absent"
 	@launchctl print "gui/$$(id -u)/$(LABEL)" 2>/dev/null \
-	  | awk '/state = |last exit code|run count/ {gsub(/^ +/,""); print "agent   " $$0}' \
-	  || echo "agent   not loaded"
+	  | awk '/state = |last exit code|runs = / {gsub(/^ +/,""); print "agent     " $$0}' \
+	  || echo "agent     not loaded"
+	@test -f "$(PLIST)" && python3 scripts/schedule.py --check "$(PLIST)"
 
 # Close the holes in the record. Resumable and budget-aware: it measures each
 # month against the court index, then spends what is left of the day's request
