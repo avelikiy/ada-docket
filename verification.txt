@@ -1,0 +1,37 @@
+# Search-engine ownership tokens. One per line. Blank lines and #comments
+# are ignored, so this file does nothing until you add something.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS MATTERS MORE THAN IT LOOKS
+#
+# This site cannot see itself. GitHub Pages serves static files and writes no
+# logs we can read, and GitHub's traffic API counts visits to the REPOSITORY,
+# not to the site. So "has Google indexed any of these 134 pages?" is not a
+# hard question here — it is an unanswerable one, from the inside.
+#
+# The entire distribution plan for this project is long-tail search. We have
+# been optimising a funnel whose first step is unmeasured.
+#
+# Connecting Search Console is the only thing that changes that, and it needs
+# a person for about five minutes. Everything else is already done.
+# ---------------------------------------------------------------------------
+#
+# HOW, start to finish:
+#
+#   1. Go to https://search.google.com/search-console
+#   2. Add a property → choose "URL prefix" (NOT "Domain": that needs a DNS
+#      record, and nobody can add DNS records to github.io).
+#      Enter exactly:  https://avelikiy.github.io/ada-docket/
+#   3. Choose the "HTML tag" verification method. Google shows you a line like
+#          <meta name="google-site-verification" content="AbC123..." />
+#   4. Paste it below — the whole line is fine, just the token is fine too.
+#   5. From this directory run:   make publish
+#   6. Back in Search Console, press Verify.
+#
+# Indexing data starts accumulating from that moment; it is not retroactive,
+# which is the argument for doing it sooner rather than at a tidier time.
+#
+# Bing Webmaster Tools works the same way and can go on its own line as
+#     msvalidate.01=YOURTOKEN
+#
+# Paste below this line:

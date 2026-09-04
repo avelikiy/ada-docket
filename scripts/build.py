@@ -44,6 +44,65 @@ SITE = os.path.join(ROOT, "site")
 BASE_URL = os.environ.get("SITE_URL", "").rstrip("/")
 
 
+# Search-engine ownership tokens, one per line, read at build time.
+#
+# This is here to shrink a human gate rather than to add a feature. Whether any
+# page of this site has ever been indexed is currently unknown AND unknowable
+# from inside it: static Pages writes no logs and the repository traffic API
+# counts the repository, not the site. Connecting Search Console is the only
+# way to find out, it takes a person about five minutes, and it has not
+# happened for three cycles.
+#
+# So the remaining work is made as small as it can be — paste one token into
+# one file and run the publish that already runs daily. A file rather than an
+# environment variable on purpose: the publisher is launchd, which hands a job
+# almost no environment, so a variable exported in somebody's shell would
+# verify once by hand and then quietly stop verifying on every scheduled run.
+VERIFICATION_PATH = os.path.join(ROOT, "verification.txt")
+
+# Bare tokens are Google's, because that is the one the project actually needs.
+# Anything given as name=value is passed through, which covers Bing and the
+# rest without this needing to know about them.
+_DEFAULT_VERIFIER = "google-site-verification"
+_VERIFIER_ALIASES = {"google": _DEFAULT_VERIFIER}
+
+
+def verification_tags() -> str:
+    """<meta> ownership tags for the head, or "" when none are configured."""
+    try:
+        with open(VERIFICATION_PATH, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return ""
+
+    tags = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        # People paste what the console showed them, which is the whole tag.
+        whole = re.search(
+            r'name=["\']([^"\']+)["\'].*?content=["\']([^"\']*)["\']', line
+        )
+        if whole:
+            name, token = whole.group(1), whole.group(2)
+        elif "=" in line and not line.startswith("<"):
+            name, _, token = line.partition("=")
+            name, token = name.strip(), token.strip()
+        else:
+            name, token = _DEFAULT_VERIFIER, line
+
+        name = _VERIFIER_ALIASES.get(name, name)
+        if not token:
+            continue
+        tags.append(
+            f'\n<meta name="{html.escape(name, quote=True)}" '
+            f'content="{html.escape(token, quote=True)}">'
+        )
+    return "".join(tags)
+
+
 def canonical_url(path: str) -> str:
     """The single absolute URL a page claims as its own. "" when unknown.
 
@@ -437,7 +496,7 @@ def page(
 <meta name="description" content="{html.escape(description)}">
 <link rel="icon" href="{FAVICON}">
 <link rel="stylesheet" href="{depth}style.css">
-<link rel="alternate" type="application/rss+xml" title="ADA Title III filings" href="{depth}feed.xml">{link_canonical}
+<link rel="alternate" type="application/rss+xml" title="ADA Title III filings" href="{depth}feed.xml">{link_canonical}{verification_tags()}
 </head>
 <body>
 
