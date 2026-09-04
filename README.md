@@ -153,8 +153,11 @@ can publish a broken site.
 `make pulse` records, once a day, the signals that are free to read without an
 account: Feedly's public subscriber count for the feed, repository stars and
 watchers, GitHub's fourteen-day repository traffic, and the size of the corpus.
-Readings accumulate in `data/pulse.ndjson` and are published at
-[`/pulse.html`](https://avelikiy.github.io/ada-docket/pulse.html).
+Readings accumulate in `metrics/pulse.ndjson` and are published at
+[`/pulse.html`](https://avelikiy.github.io/ada-docket/pulse.html). They live
+outside `data/` on purpose: everything in `data/` is read as filings, and a
+readings file sitting there once killed the daily fetch outright while the
+site went on publishing as though nothing had happened.
 
 The page exists to publish a gap rather than hide it. This project set itself a
 closing condition before launch — fewer than fifty subscribers or fewer than a
@@ -164,6 +167,31 @@ static site on github.io. GitHub reports no traffic for Pages, and the
 alternatives each need a server, a paid account, or a Search Console sign-in.
 That half of the condition is therefore published as blank ruled lines. A proxy
 in that column is how a closing condition quietly stops meaning anything.
+
+### The one step that needs a person
+
+Whether any of these 134 pages has ever appeared in a search result is not a
+hard question here — it is an unanswerable one from the inside. Static Pages
+writes no logs we can read, and GitHub's traffic API counts the repository
+rather than the site. Long-tail search is the whole distribution plan, and its
+first step has never been measured.
+
+Search Console answers it, and nothing else free does. The build side is
+already wired, so what remains is:
+
+```
+1. search.google.com/search-console → Add property → URL prefix
+   (not "Domain" — that needs a DNS record, and github.io takes none)
+   https://avelikiy.github.io/ada-docket/
+2. Choose "HTML tag", paste the line it shows into verification.txt
+3. make publish
+4. Press Verify
+```
+
+`verification.txt` carries the same walkthrough in its comments and does
+nothing until a token is added. Indexing data is not retroactive: it starts
+from the day this is done, which is the argument against waiting for a tidier
+moment.
 
 ### Known gap
 
