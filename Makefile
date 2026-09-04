@@ -4,7 +4,7 @@ export SITE_URL
 
 # Everything below runs on a stock Python 3.9+ with no dependencies.
 
-.PHONY: update pulse build serve publish daily backfill coverage plan test schedule unschedule schedule-status
+.PHONY: update pulse build serve publish daily backfill status coverage plan test schedule unschedule schedule-status
 
 REPO_DIR := $(shell pwd)
 PLIST    := $(HOME)/Library/LaunchAgents/com.ada-docket.daily.plist
@@ -13,7 +13,7 @@ LABEL    := com.ada-docket.daily
 update:            ## pull the last ten days of filings into data/
 	python3 scripts/fetch.py --days 10
 
-pulse:             ## record today's measurable signals into data/pulse.ndjson
+pulse:             ## record today's measurable signals into metrics/pulse.ndjson
 	python3 scripts/pulse.py
 
 build:             ## render site/ from data/
@@ -69,7 +69,10 @@ schedule-status:   ## is the local schedule installed and loaded?
 backfill:
 	python3 scripts/backfill.py
 
-coverage:          ## what we hold per month, measured against the court index
+status:            ## what we hold per month, read from the last measurement; spends nothing
+	python3 scripts/status.py
+
+coverage:          ## re-measure every month against the court index (SPENDS ~1 request a month)
 	python3 scripts/backfill.py --audit-only
 
 plan:              ## what the backfill would do next, spending nothing
