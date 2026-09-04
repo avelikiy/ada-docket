@@ -238,4 +238,21 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except urllib.error.HTTPError as exc:
+        # A 429 that survives the backoff means the daily ceiling is spent, not
+        # that anything is broken. Saying so in one line matters: this runs
+        # unattended and lands in a log a person only skims. A traceback there
+        # reads like a defect and teaches the reader to stop looking, which is
+        # how a genuine failure gets missed later.
+        if exc.code == 429:
+            print(
+                "CourtListener rate limit reached (5/min, 50/hour, 125/day for "
+                "anonymous callers). Nothing was written; the next run picks up "
+                "where this one stopped. An API token would lift this.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        print(f"CourtListener returned HTTP {exc.code}: {exc.reason}", file=sys.stderr)
+        sys.exit(1)
