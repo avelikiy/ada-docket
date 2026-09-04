@@ -102,6 +102,23 @@ def source_count(ym: str) -> int:
     return int(data.get("count") or 0)
 
 
+# Results a page of the search endpoint returns. Measured, not assumed: a probe
+# of May 2025 reported 502 filings and served twenty of them.
+PAGE_SIZE = 20
+
+# Pages the accommodations code adds on top of the ADA code. It is a small
+# fraction of 446 in every month measured, but it is not nothing, and a cost
+# estimate that ignores it would keep stopping a crawl just short of the end.
+NOS_443_PAGES = 3
+
+
+def month_cost(doc: dict, ym: str) -> int:
+    """Roughly what a full crawl of one month costs, in requests."""
+    entry = doc.get("months", {}).get(ym, {})
+    api = entry.get("api_446") or 0
+    return -(-api // PAGE_SIZE) + NOS_443_PAGES  # ceiling division
+
+
 def audit(doc: dict, months: list[str], budget: int) -> int:
     """Measure each month against the source. Returns requests spent."""
     spent = 0
@@ -157,6 +174,10 @@ def repair(doc: dict, ym: str, budget: int) -> tuple[int, int]:
         raise
 
     existing = dict(before)
+    # `first_seen` records when this record first saw a docket, not when it was
+    # filed. A backfilled row is seen today; dating it to the end of the month
+    # it belongs to would be a tidier-looking history and a false one.
+    seen_today = dt.date.today().isoformat()
     added = 0
     for row in raw:
         did = row.get("docket_id")
@@ -164,10 +185,10 @@ def repair(doc: dict, ym: str, budget: int) -> tuple[int, int]:
             continue
         rec = fetch.slim(row)
         if did not in existing:
-            rec["first_seen"] = existing.get(did, {}).get("first_seen") or until
+            rec["first_seen"] = seen_today
             added += 1
         else:
-            rec["first_seen"] = existing[did].get("first_seen", until)
+            rec["first_seen"] = existing[did].get("first_seen", seen_today)
         existing[did] = rec
 
     fetch.save(existing)
@@ -273,7 +294,19 @@ def main() -> int:
                 break
             ym = needs[0]
             left = budget - spent
-            if left < len(fetch.SUIT_NATURES):
+
+            # Do not start a month the budget cannot finish. A crawl cut off
+            # part-way keeps the rows it fetched but leaves the month short, so
+            # tomorrow re-walks the same pages from the beginning and pays for
+            # them twice. Better to leave the requests unspent and start the
+            # month whole tomorrow.
+            need = month_cost(doc, ym)
+            if need > left:
+                print(
+                    f"\n{ym} needs about {need} requests and {left} remain; "
+                    f"leaving it for tomorrow rather than starting a crawl "
+                    f"that cannot finish"
+                )
                 break
             print(f"\nrepair — {len(needs)} month(s) short")
             attempted.add(ym)

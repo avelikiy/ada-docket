@@ -243,5 +243,40 @@ class TestRoundTrip(unittest.TestCase):
             json.load(open(path, encoding="utf-8"))  # parses
 
 
+class TestMonthCost(unittest.TestCase):
+    """What a full crawl of a month costs, so the backfill can decline to start
+    one it cannot finish. A crawl cut off part-way is paid for twice: the rows
+    are kept, but the month stays short and tomorrow re-walks it from page one.
+    """
+
+    def setUp(self):
+        sys.path.insert(
+            0,
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"
+            ),
+        )
+
+    def test_cost_of_a_real_month(self):
+        import backfill
+
+        # May 2025 reports 502 filings; the endpoint serves twenty a page.
+        doc = {"months": {"2025-05": {"api_446": 502}}}
+        self.assertEqual(
+            backfill.month_cost(doc, "2025-05"), 26 + backfill.NOS_443_PAGES
+        )
+
+    def test_a_part_page_still_costs_a_whole_request(self):
+        import backfill
+
+        doc = {"months": {"x": {"api_446": 21}}}
+        self.assertEqual(backfill.month_cost(doc, "x"), 2 + backfill.NOS_443_PAGES)
+
+    def test_an_unmeasured_month_costs_only_the_overhead(self):
+        import backfill
+
+        self.assertEqual(backfill.month_cost({}, "2025-05"), backfill.NOS_443_PAGES)
+
+
 if __name__ == "__main__":
     unittest.main()

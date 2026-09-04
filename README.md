@@ -30,6 +30,24 @@ bar files, web-accessibility cases included.
 | `suitNature`, `cause` | Clerk's coding |
 | `docket_absolute_url` | Path to the docket on CourtListener |
 
+### How complete each month is
+
+A month page states what it holds and, when that is short of what the court
+index reports, says so and shows the shortfall. This is measured rather than
+assumed: the search endpoint reports a `count` for any window regardless of how
+many pages a crawl walked, so one request a month settles it, and the result is
+kept in `data/coverage.json`.
+
+The distinction matters because it was got wrong. A backfill that stops at the
+rate ceiling leaves a month that looks, to everything downstream, exactly like a
+quiet month — the stored rows record what came back, never what was asked for.
+April 2025 was published as "25 filings, 0.8 a day" on that basis; the index
+reports about 409. Weeks we have not collected now draw as ruled columns rather
+than as noughts, for the same reason.
+
+`make coverage` measures it, `make plan` says what the backfill would do next,
+and the daily run does both without being asked.
+
 ### What it does not cover
 
 State-court actions, demand letters that never become suits, and anything a
@@ -40,10 +58,14 @@ does not say what the claim was about.
 ## Layout
 
 ```
-scripts/fetch.py   pulls new filings, writes data/YYYY-MM.ndjson
-scripts/build.py   renders site/ — index.html, cases.csv, cases.json, feed.xml
-data/              the record, one file per filing month
-.github/workflows/daily.yml   runs both, commits data, publishes the site
+scripts/fetch.py     pulls new filings, writes data/YYYY-MM.ndjson
+scripts/coverage.py  how much of each month we hold, measured not assumed
+scripts/backfill.py  audits coverage and closes the holes, a day's budget at a time
+scripts/build.py     renders site/ — index.html, cases.csv, cases.json, feed.xml
+scripts/daily.sh     the whole loop, run unattended by launchd
+data/                the record, one file per filing month
+data/coverage.json   what the court index reports per month, against what we hold
+tests/               standard library unittest; `make test`
 ```
 
 The record is partitioned by month on purpose. One combined file would be

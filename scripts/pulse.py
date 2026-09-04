@@ -30,7 +30,7 @@ a paid analytics account, or a human to sign in to Google Search Console. All
 three are gates this company does not currently have. The gap is recorded as
 null rather than estimated.
 
-Writes one line per day to data/pulse.ndjson, keyed on the date, so re-running
+Writes one line per day to metrics/pulse.ndjson, keyed on the date, so re-running
 the script on the same day corrects that day rather than appending a duplicate.
 Standard library only.
 """
