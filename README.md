@@ -84,13 +84,57 @@ contain errors. Verify against the docket before relying on anything here.
 ## Publishing
 
 The site is served from the `gh-pages` branch. `make publish` renders `site/` and
-force-pushes it there; `make daily` does the whole loop — fetch, commit the
-record, render, publish.
+force-pushes it there; `make daily` runs the whole loop — fetch, measure, render,
+commit the record, publish. Branch-based Pages was chosen over an Actions
+artifact deliberately, and that decision turned out to carry the project.
 
-The `daily` workflow does the same thing on a schedule. Branch-based Pages was
-chosen over an Actions artifact deliberately: it keeps `make publish` working
-from any machine, so the site does not depend on the repository's Actions
-availability.
+### Where the schedule runs, and why it is not GitHub
+
+`.github/workflows/daily.yml` still describes the job, but it does not run.
+Actions is unavailable on this account: a job is rejected in about three seconds
+having executed zero steps and written no log, and the same thing happens on six
+unrelated repositories under the same owner, the last success being in May. The
+repository is public with Actions enabled and `allowed_actions: all`, so it is
+not a repository setting. GitHub's own `pages-build-deployment` still succeeds,
+which is why publishing from a branch keeps working while our workflow does not.
+Unblocking it needs a person in the account's billing settings; nothing in this
+repository can fix it.
+
+So the schedule runs locally instead:
+
+```sh
+make schedule          # install one launchd agent, daily at 07:20 local
+make schedule-status   # is it installed and loaded?
+make unschedule        # remove it — this is the entire uninstall
+```
+
+`make schedule` writes exactly one file,
+`~/Library/LaunchAgents/com.ada-docket.daily.plist`, and touches nothing else.
+It runs as a user agent rather than a daemon so the job can reach the keychain
+holding the git credentials.
+
+**The weak point, stated plainly:** a laptop asleep at 07:20 misses that day
+outright. This is worse than a hosted scheduler and better than a site that
+promises a daily record and quietly stops. Runs append to `logs/daily-YYYY-MM.log`;
+each stage reports its own outcome, and a build failure stops the run before it
+can publish a broken site.
+
+## Measuring it
+
+`make pulse` records, once a day, the signals that are free to read without an
+account: Feedly's public subscriber count for the feed, repository stars and
+watchers, GitHub's fourteen-day repository traffic, and the size of the corpus.
+Readings accumulate in `data/pulse.ndjson` and are published at
+[`/pulse.html`](https://avelikiy.github.io/ada-docket/pulse.html).
+
+The page exists to publish a gap rather than hide it. This project set itself a
+closing condition before launch — fewer than fifty subscribers or fewer than a
+hundred and twenty unique readers at ninety days and it shuts down — and only
+afterwards established that unique readers are not observable at all from a
+static site on github.io. GitHub reports no traffic for Pages, and the
+alternatives each need a server, a paid account, or a Search Console sign-in.
+That half of the condition is therefore published as blank ruled lines. A proxy
+in that column is how a closing condition quietly stops meaning anything.
 
 ### Known gap
 

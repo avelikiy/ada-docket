@@ -49,7 +49,13 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "data")
-PULSE = os.path.join(DATA_DIR, "pulse.ndjson")
+# Deliberately NOT under data/. Both the fetcher and the builder read every
+# .ndjson in data/ as a filing partition, so a readings file living there is
+# loaded as if it were a docket — which is exactly what happened the first
+# time this ran: the fetch died on a missing docket_id and the site quietly
+# counted one extra "filing". Readings live in their own directory instead.
+METRICS_DIR = os.path.join(ROOT, "metrics")
+PULSE = os.path.join(METRICS_DIR, "pulse.ndjson")
 
 REPO = os.environ.get("REPO_SLUG", "avelikiy/ada-docket")
 FEED = os.environ.get("FEED_URL", "https://avelikiy.github.io/ada-docket/feed.xml")
@@ -146,7 +152,7 @@ def corpus_size() -> dict:
     """How much record there is to be found — the supply side of discovery."""
     cases = 0
     for name in sorted(os.listdir(DATA_DIR)):
-        if name.endswith(".ndjson") and name != "pulse.ndjson":
+        if name.endswith(".ndjson"):
             with open(os.path.join(DATA_DIR, name), encoding="utf-8") as fh:
                 cases += sum(1 for line in fh if line.strip())
     site = os.path.join(ROOT, "site")
@@ -172,6 +178,7 @@ def read_history() -> list[dict]:
 
 
 def write_history(rows: list[dict]) -> None:
+    os.makedirs(METRICS_DIR, exist_ok=True)
     rows.sort(key=lambda r: r.get("date", ""))
     tmp = PULSE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:

@@ -65,6 +65,17 @@ ORG_TAIL = re.compile(
 
 TABLE_LIMIT = 400
 
+# Date of the newest filing in the record, set by main() before any page is
+# rendered. Drives the staleness banner in the page shell.
+LATEST_FILING = ""
+
+# court_id values that get their own page. A court with fewer than
+# COURT_MIN_FILINGS filings is deliberately not published — a page with three
+# rows says nothing — so every leaderboard has to check before it links, or it
+# emits a 404. Seventy-nine such links shipped before this was caught.
+COURT_PAGES: set[str] = set()
+COURT_MIN_FILINGS = 5
+
 
 # ---------------------------------------------------------------- data ----
 
@@ -222,13 +233,20 @@ def table(
                 [r.get("caseName"), r.get("court"), court_of(r), r.get("docketNumber")],
             )
         ).lower()
-        court_cell = (
-            f'<td class="c-court"><a href="{depth}court/'
-            f'{html.escape(r.get("court_id") or "unknown")}.html">'
-            f"{html.escape(court_of(r))}</a></td>"
-            if show_court
-            else ""
-        )
+        # Only courts with their own page are linked. A district below the
+        # publishing threshold has no page, and linking to it anyway is where
+        # most of the site's broken links came from.
+        cid = r.get("court_id") or "unknown"
+        label = html.escape(court_of(r))
+        if not show_court:
+            court_cell = ""
+        elif cid in COURT_PAGES:
+            court_cell = (
+                f'<td class="c-court">'
+                f'<a href="{depth}court/{html.escape(cid)}.html">{label}</a></td>'
+            )
+        else:
+            court_cell = f'<td class="c-court">{label}</td>'
         body.append(f"""
           <tr data-search="{html.escape(hay)}">
             <td class="c-date"><time datetime="{html.escape(r.get("dateFiled") or "")}">{html.escape(r.get("dateFiled") or "—")}</time>{' <b class="new">new</b>' if new else ""}</td>
@@ -312,6 +330,24 @@ def page(
 ) -> str:
     """One shell for every page. depth is "" at the root, "../" one level down."""
     generated = dt.datetime.now(dt.timezone.utc).strftime("%d %B %Y, %H:%M UTC")
+    # The site promises a daily record, and the schedule now runs on a personal
+    # machine: a closed laptop at the scheduled minute means no run, and nothing
+    # anywhere would say so. A stale register that still reads "updated daily"
+    # is a worse failure than an obviously broken one, so the age of the newest
+    # filing is stated on every page and called out once it stops being current.
+    stale = ""
+    if LATEST_FILING:
+        try:
+            age = (dt.date.today() - dt.date.fromisoformat(LATEST_FILING)).days
+        except ValueError:
+            age = 0
+        if age > 4:
+            stale = (
+                f'<p class="stale" role="status">Behind: the newest filing on this '
+                f"record was docketed {age} days ago, on {longdate(LATEST_FILING)}. "
+                f"The daily update has not run since. Treat everything here as "
+                f"current to that date and no later.</p>"
+            )
     link_canonical = (
         f'\n<link rel="canonical" href="{html.escape(BASE_URL + "/" + canonical)}">'
         if BASE_URL and canonical
@@ -342,6 +378,7 @@ def page(
 
 <main>
   <div class="wrap">
+    {stale}
     {f'<nav class="crumb" aria-label="Breadcrumb">{crumb}</nav>' if crumb else ""}
     <div class="page-head">
       <h2 class="page-title">{heading}</h2>
@@ -375,7 +412,11 @@ def page(
 # ----------------------------------------------------------------- pages ----
 
 
-def index_page(rows: list[dict]) -> str:
+def index_page(
+    rows: list[dict],
+    firm_index: list[tuple[str, str, int]] | None = None,
+    state_index: list[tuple[str, str, int]] | None = None,
+) -> str:
     today = dt.date.today()
     last7 = [
         r
@@ -394,7 +435,8 @@ def index_page(rows: list[dict]) -> str:
         (court_of(r), r.get("court_id") or "unknown") for r in rows
     )
     court_items = [
-        ((label, f"{cid}.html"), n) for (label, cid), n in courts.most_common(10)
+        ((label, f"{cid}.html") if cid in COURT_PAGES else label, n)
+        for (label, cid), n in courts.most_common(10)
     ]
 
     # Counsel of record on filings under 30 days old. On a freshly opened docket
@@ -410,6 +452,44 @@ def index_page(rows: list[dict]) -> str:
         {(r.get("dateFiled") or "")[:7] for r in rows if r.get("dateFiled")},
         reverse=True,
     )
+    # States and firms of record, linked from here so a crawler and a reader
+    # reach them the same way. A page nothing links to is a page nothing finds,
+    # and the sitemap alone is a weak substitute for being reachable.
+    state_links = " · ".join(
+        f'<a href="state/{code}.html">{html.escape(name)}</a> <span class="dim">{n:,}</span>'
+        for name, code, n in sorted(state_index or [], key=lambda t: -t[2])
+    )
+    firm_links = " · ".join(
+        f'<a href="firm/{slug}.html">{html.escape(name)}</a> <span class="dim">{n:,}</span>'
+        for name, slug, n in (firm_index or [])[:30]
+    )
+    browse = ""
+    if state_links or firm_links:
+        parts = []
+        if state_links:
+            parts.append(
+                "<h3>States with more than one federal district</h3>"
+                f'<p class="inline-index">{state_links}</p>'
+                '<p class="note">A state with a single district is not listed: its '
+                "page would repeat that court's record under another name. Those "
+                "states are reachable through the district list above.</p>"
+            )
+        if firm_links:
+            parts.append(
+                f"<h3>Counsel of record, by filings on this record</h3>"
+                f'<p class="inline-index">{firm_links}</p>'
+                '<p class="note">Firms appearing on at least five dockets, '
+                f"{len(firm_index or [])} in total. Counsel appears for either side, "
+                "and appearing on a docket says nothing about the merits of a case.</p>"
+            )
+        browse = (
+            "\n    <section>\n      <h2>Browse the record</h2>\n"
+            "      <p>One page for each way people look for this: a state, a "
+            "district, a month, a firm of record.</p>\n      "
+            + "\n      ".join(parts)
+            + "\n    </section>\n"
+        )
+
     month_links = " · ".join(
         f'<a href="month/{m}.html">{monthname(m)}</a>' for m in months
     )
@@ -456,6 +536,7 @@ def index_page(rows: list[dict]) -> str:
       <div class="boards">{"".join(boards)}</div>
     </section>
 
+{browse}
     <section>
       <h2>The record</h2>
       <p>Newest first. Every defendant links to the docket on CourtListener, where
@@ -598,9 +679,223 @@ def court_page(court_id: str, rows: list[dict]) -> str:
     )
 
 
+# States that have more than one federal district. A state page for one of
+# these aggregates courts no single court page covers, which is the whole
+# reason it may exist. A single-district state gets NO page: "ADA lawsuits in
+# New Jersey" and "ADA lawsuits in D.N.J." would be the same list under two
+# headings, and mass-producing near-duplicate pages is the one SEO mistake that
+# can cost the site its entire index rather than merely failing to work.
+MULTI_DISTRICT = {
+    "FL": "Florida",
+    "NY": "New York",
+    "CA": "California",
+    "IL": "Illinois",
+    "TX": "Texas",
+    "PA": "Pennsylvania",
+    "GA": "Georgia",
+    "IN": "Indiana",
+    "LA": "Louisiana",
+    "OH": "Ohio",
+    "MI": "Michigan",
+    "MO": "Missouri",
+    "NC": "North Carolina",
+    "TN": "Tennessee",
+    "AL": "Alabama",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WI": "Wisconsin",
+    "OK": "Oklahoma",
+    "IA": "Iowa",
+    "KY": "Kentucky",
+    "MS": "Mississippi",
+    "WV": "West Virginia",
+    "AR": "Arkansas",
+}
+
+# A state page needs enough filings across enough districts to say something a
+# court page does not.
+STATE_MIN_FILINGS = 20
+FIRM_MIN_FILINGS = 5
+
+
+def firm_slug(name: str) -> str:
+    """A stable file name for a firm as counsel of record wrote it."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return slug[:60] or "firm"
+
+
+def firm_page(
+    name: str, rows: list[dict], slug: str, variants: list[str] | None = None
+) -> str:
+    """One page per firm appearing as counsel of record.
+
+    Counsel of record arrives as an exact string from the docket and is used
+    exactly as it arrives. Nothing is merged. Two spellings of what a reader
+    may recognise as one practice — "Gottlieb & Associates" and "Jeffrey M.
+    Gottlieb, Esq." — stay two entries, because the alternative is guessing that
+    two names denote one legal entity, and guessing at identity is precisely the
+    error that took the defendant grouping off this site.
+
+    Firms are businesses acting in a public professional capacity on a public
+    record, which is why this page exists where a page per defendant does not.
+    """
+    dates = sorted(r["dateFiled"] for r in rows if r.get("dateFiled"))
+    span = f"{longdate(dates[0])} to {longdate(dates[-1])}" if dates else "—"
+    courts = collections.Counter(
+        (court_of(r), r.get("court_id") or "unknown") for r in rows
+    )
+    court_items = [
+        ((label, f"../court/{cid}.html") if cid in COURT_PAGES else label, n)
+        for (label, cid), n in courts.most_common(10)
+    ]
+    months = collections.Counter(
+        (r.get("dateFiled") or "")[:7] for r in rows if r.get("dateFiled")
+    )
+    # Spellings that differ only in punctuation are counted together; saying so
+    # is cheaper than letting a reader wonder why a comma changed the total.
+    variant_note = (
+        " Dockets spelling the name "
+        + " or ".join(html.escape(v) for v in variants)
+        + " are counted here too; the spellings differ only in punctuation."
+        if variants
+        else ""
+    )
+    body = f"""
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><b>{len(rows):,}</b><span>filings on this record</span></div>
+      <div class="stat"><b>{len(courts):,}</b><span>districts</span></div>
+      <div class="stat"><b>{len(months):,}</b><span>months with a filing</span></div>
+    </div>
+    <section>
+      <h2>Filings a week</h2>
+      <p>Complete weeks only, across every district.</p>
+      {bar_strip(weekly(rows))}
+    </section>
+    <section>
+      <h2>Where these were filed</h2>
+      <p>Each district opens its own record.</p>
+      <div class="boards">{leaderboard(court_items, "Districts", "Counted once per docket.")}</div>
+    </section>
+    <section>
+      <h2>The filings</h2>
+      <p>Newest first. Each defendant links to the docket on CourtListener.</p>
+      {table(rows, depth="../")}
+      <p class="note">This page counts dockets on which
+         {html.escape(name)} appears as counsel of record, exactly as the docket
+         spells it. Appearing on a docket says nothing about the merits of any
+         case, and a firm may appear for either side.{variant_note}</p>
+    </section>
+  </div>"""
+    return page(
+        title=f"{name} — ADA Title III filings on record ({len(rows):,} cases)",
+        description=(
+            f"{len(rows):,} federal ADA Title III lawsuits on which {name} appears "
+            f"as counsel of record, {span}, across {len(courts)} district "
+            f"{'court' if len(courts) == 1 else 'courts'}. Free, updated daily."
+        ),
+        depth="../",
+        canonical=f"firm/{slug}.html",
+        crumb='<a href="../index.html">The record</a> → Counsel → ' + html.escape(name),
+        heading=html.escape(name),
+        standfirst=(
+            f"{len(rows):,} filings on this record name {html.escape(name)} as "
+            f"counsel, {span}."
+        ),
+        body=body,
+    )
+
+
+def state_page(code: str, name: str, rows: list[dict]) -> str:
+    """One page per multi-district state.
+
+    It exists only because a state's filings are split across districts that no
+    single court page gathers — Florida's across three, New York's across four.
+    That is the entire justification, and it is why single-district states are
+    excluded rather than given a page that would restate a court page.
+    """
+    dates = sorted(r["dateFiled"] for r in rows if r.get("dateFiled"))
+    span = f"{longdate(dates[0])} to {longdate(dates[-1])}" if dates else "—"
+    courts = collections.Counter(
+        (court_of(r), r.get("court_id") or "unknown") for r in rows
+    )
+    court_items = [
+        ((label, f"../court/{cid}.html") if cid in COURT_PAGES else label, n)
+        for (label, cid), n in courts.most_common(12)
+    ]
+    firms: collections.Counter = collections.Counter()
+    for r in rows:
+        for f in r.get("firm") or []:
+            if f and len(f) > 3:
+                firms[f.strip()] += 1
+
+    # California's federal number reads low against its reputation for a
+    # concrete reason, and a page that omits it misleads by arithmetic alone.
+    caveat = ""
+    if code == "CA":
+        caveat = """
+    <section>
+      <h2>Why California's federal count reads low</h2>
+      <p>California has its own access statute, the Unruh Civil Rights Act, which
+         allows statutory damages that the ADA does not. A great deal of
+         California access litigation is therefore filed in state court and never
+         appears on a federal docket. This page counts federal filings only.
+         Treat it as a floor for California, and a considerably lower one than
+         for states without a damages statute of their own.</p>
+    </section>"""
+
+    body = f"""
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><b>{len(rows):,}</b><span>federal filings tracked</span></div>
+      <div class="stat"><b>{len(courts):,}</b><span>districts</span></div>
+      <div class="stat"><b>{len(firms):,}</b><span>firms of record</span></div>
+    </div>
+    <section>
+      <h2>Filings a week across {html.escape(name)}</h2>
+      <p>Complete weeks only, every district combined.</p>
+      {bar_strip(weekly(rows))}
+    </section>
+    <section>
+      <h2>By district</h2>
+      <p>{html.escape(name)}'s federal filings split across its districts. Each
+         opens that district's own record.</p>
+      <div class="boards">
+        {leaderboard(court_items, "Districts", "Counted once per docket.")}
+        {leaderboard(firms.most_common(10), "Counsel of record", "Across every filing in the state, both sides included.")}
+      </div>
+    </section>{caveat}
+    <section>
+      <h2>The record for {html.escape(name)}</h2>
+      <p>Newest first. Each defendant links to the docket on CourtListener.</p>
+      {table(rows, depth="../")}
+      <p class="note">Federal district courts only. State-court access claims,
+         and demand letters that never become suits, are invisible here — read
+         the count as a floor. The <a href="../cases.csv">CSV</a> carries every
+         state.</p>
+    </section>
+  </div>"""
+    return page(
+        title=f"ADA Title III lawsuits in {name} — every federal filing on record",
+        description=(
+            f"{len(rows):,} federal Americans with Disabilities Act Title III "
+            f"lawsuits filed in {name}'s {len(courts)} district courts, {span}. "
+            f"Defendants, docket numbers and counsel. Free, updated daily."
+        ),
+        depth="../",
+        canonical=f"state/{code.lower()}.html",
+        crumb='<a href="../index.html">The record</a> → ' + html.escape(name),
+        heading=f"ADA Title III filings in {html.escape(name)}",
+        standfirst=(
+            f"{len(rows):,} federal filings across {len(courts)} districts, {span}."
+        ),
+        body=body,
+    )
+
+
 def load_pulse() -> list[dict]:
     """Daily readings written by scripts/pulse.py, oldest first."""
-    path = os.path.join(DATA_DIR, "pulse.ndjson")
+    path = os.path.join(ROOT, "metrics", "pulse.ndjson")
     if not os.path.exists(path):
         return []
     out = []
@@ -761,6 +1056,22 @@ def pulse_page(rows: list[dict], readings: list[dict]) -> str:
        condition. The subscriber half stands and is read below. The reader half
        is void, and calling it void is more useful than substituting a number
        that looks like it but is not.</p>
+    <p>The half that survives only works in one direction, which is the worse
+       problem. Fifty subscribers would prove the record is read. Fewer than
+       fifty proves nothing: the count covers one reader app, so the true
+       figure is always this or higher and never lower. A condition that can
+       confirm continuing but can never confirm closing is not a brake. It is
+       the bias it was written to prevent, wearing the brake's clothes — on day
+       ninety it produces ninety rows of nulls and the sentence "the data were
+       incomplete, give it another quarter".</p>
+    <p>So the condition is amended here, in public, before there is any number
+       to suit. Two free instruments would make it two-sided — Search Console,
+       verified by uploading a file to this site, and Cloudflare Web Analytics,
+       which needs no domain change — and each costs one person about five
+       minutes in a browser. Neither can be set up from inside this project.
+       <strong>If neither is connected by day ninety, the project closes on that
+       fact alone</strong>, without waiting for a number. Ninety days spent
+       blind is the outcome worth avoiding, not a low score.</p>
   </section>
 
   <section class="wrap">
@@ -807,7 +1118,8 @@ def month_page(ym: str, rows: list[dict], order: list[str]) -> str:
         (court_of(r), r.get("court_id") or "unknown") for r in rows
     )
     court_items = [
-        ((label, f"{cid}.html"), n) for (label, cid), n in courts.most_common(10)
+        ((label, f"{cid}.html") if cid in COURT_PAGES else label, n)
+        for (label, cid), n in courts.most_common(10)
     ]
     i = order.index(ym)
     prev_link = (
@@ -946,7 +1258,7 @@ h3 { font-size:1rem; font-weight:400; margin:0 0 .9rem; padding-bottom:.4rem;
 .lb-name { font-size:.95rem; overflow-wrap:anywhere; }
 .lb-bar { height:6px; background:var(--seal); width:var(--w); justify-self:start; }
 .lb-n { font-family:var(--mono); font-size:.85rem; text-align:right; color:var(--ink-soft); }
-.note { font-size:.82rem; color:var(--ink-soft); margin:.75rem 0 0; }
+.inline-index { max-width:none; line-height:2; }\n.dim { color:var(--ink-soft); font-family:var(--mono); font-size:.8rem; }\n.stale { margin:1.25rem 0 0; padding:.85rem 1rem; background:var(--paper-2);\n  border-left:4px solid var(--stamp); color:var(--ink); font-size:.95rem;\n  max-width:46rem; }\n.note { font-size:.82rem; color:var(--ink-soft); margin:.75rem 0 0; }
 
 .filter { display:flex; flex-wrap:wrap; gap:.75rem; align-items:baseline;
           margin-bottom:1rem; }
@@ -1076,21 +1388,40 @@ def write_data_files(rows: list[dict]) -> None:
         )
 
 
-def write_feed(rows: list[dict]) -> None:
+def write_feed(rows: list[dict], court_pages: set[str]) -> None:
+    """The daily feed.
+
+    Every item used to link straight to CourtListener. That meant a subscriber
+    never had a reason to arrive here: we were doing free distribution for the
+    Free Law Project while measuring ourselves on subscribers who, by
+    construction, would never visit. An item now points at the page on this site
+    that holds the filing — its court's record — and carries the docket link in
+    the body, where the reader can still reach the source in one click. The
+    attribution is unchanged and still owed; only the destination of the
+    headline moved.
+    """
     now = dt.datetime.now(dt.timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    home = BASE_URL or CL
     items = []
     for r in rows[:50]:
         title = f"{r.get('caseName') or 'Filing'} ({court_of(r)})"
+        cid = r.get("court_id") or ""
+        here = (
+            f"{home}/court/{cid}.html" if cid in court_pages else f"{home}/index.html"
+        )
+        docket = CL + (r.get("docket_absolute_url") or "")
         desc = (
             f"Filed {longdate(r.get('dateFiled') or '')} in {r.get('court') or '—'}. "
             f"Docket {r.get('docketNumber') or '—'}. "
-            f"Nature of suit: {r.get('suitNature') or '—'}."
+            f"Nature of suit: {r.get('suitNature') or '—'}. "
+            f"Source docket on CourtListener: {docket}"
         )
         items.append(f"""
     <item>
       <title>{html.escape(title)}</title>
-      <link>{html.escape(CL + (r.get("docket_absolute_url") or ""))}</link>
+      <link>{html.escape(here)}</link>
       <guid isPermaLink="false">courtlistener-docket-{r.get("docket_id")}</guid>
+      <source url="{html.escape(docket)}">CourtListener</source>
       <description>{html.escape(desc)}</description>
     </item>""")
     with open(os.path.join(SITE, "feed.xml"), "w", encoding="utf-8") as fh:
@@ -1141,13 +1472,19 @@ def main() -> int:
     os.makedirs(os.path.join(SITE, "court"), exist_ok=True)
     os.makedirs(os.path.join(SITE, "month"), exist_ok=True)
     rows = load()
+    global LATEST_FILING
+    LATEST_FILING = max((r.get("dateFiled") or "" for r in rows), default="")
+
+    counts: collections.Counter = collections.Counter(
+        r.get("court_id") or "unknown" for r in rows
+    )
+    COURT_PAGES.clear()
+    COURT_PAGES.update(c for c, n in counts.items() if n >= COURT_MIN_FILINGS)
 
     with open(os.path.join(SITE, "style.css"), "w", encoding="utf-8") as fh:
         fh.write(STYLE)
     with open(os.path.join(SITE, "filter.js"), "w", encoding="utf-8") as fh:
         fh.write(FILTER_JS)
-    with open(os.path.join(SITE, "index.html"), "w", encoding="utf-8") as fh:
-        fh.write(index_page(rows))
     paths = ["index.html", "pulse.html"]
 
     by_court: dict[str, list[dict]] = {}
@@ -1156,13 +1493,71 @@ def main() -> int:
     for cid, batch in by_court.items():
         # A court with a handful of filings has nothing to say on its own page,
         # and a thin page in the sitemap is worse than no page.
-        if len(batch) < 5:
+        if cid not in COURT_PAGES:
             continue
         with open(
             os.path.join(SITE, "court", f"{cid}.html"), "w", encoding="utf-8"
         ) as fh:
             fh.write(court_page(cid, batch))
         paths.append(f"court/{cid}.html")
+
+    # One page per firm of record. Counsel strings are used exactly as the
+    # docket spells them and never merged — see firm_page.
+    os.makedirs(os.path.join(SITE, "firm"), exist_ok=True)
+    # Keyed on the slug, which differs from the raw string only in punctuation
+    # and case. "Jackson Lewis, P.C." and "Jackson Lewis P.C." are one firm
+    # separated by a comma, and keying on the raw string silently overwrote one
+    # page with the other — the larger practice was published showing five
+    # filings instead of forty-eight. Note the limit of this merge: it combines
+    # spellings of the SAME name, and never two different names. Deciding that
+    # two different names denote one entity is the guess that took defendant
+    # grouping off this site, and it is not being made here.
+    by_firm: dict[str, dict] = {}
+    for r in rows:
+        for f in r.get("firm") or []:
+            f = (f or "").strip()
+            if len(f) <= 3:
+                continue
+            slot = by_firm.setdefault(
+                firm_slug(f), {"spellings": collections.Counter(), "rows": {}}
+            )
+            slot["spellings"][f] += 1
+            slot["rows"][r.get("docket_id")] = r
+    firm_index: list[tuple[str, str, int]] = []
+    for slug, slot in by_firm.items():
+        batch = list(slot["rows"].values())
+        if len(batch) < FIRM_MIN_FILINGS:
+            continue
+        batch.sort(key=lambda r: r.get("dateFiled") or "", reverse=True)
+        name = slot["spellings"].most_common(1)[0][0]
+        variants = sorted(s for s in slot["spellings"] if s != name)
+        with open(
+            os.path.join(SITE, "firm", f"{slug}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(firm_page(name, batch, slug, variants))
+        paths.append(f"firm/{slug}.html")
+        firm_index.append((name, slug, len(batch)))
+    firm_index.sort(key=lambda t: -t[2])
+
+    # One page per multi-district state only. A single-district state would get
+    # a page identical to its court's under a different heading.
+    os.makedirs(os.path.join(SITE, "state"), exist_ok=True)
+    by_state: dict[str, list[dict]] = {}
+    for r in rows:
+        code = (r.get("court_id") or "")[:2].upper()
+        if code in MULTI_DISTRICT:
+            by_state.setdefault(code, []).append(r)
+    state_index: list[tuple[str, str, int]] = []
+    for code, batch in by_state.items():
+        districts = {r.get("court_id") for r in batch}
+        if len(batch) < STATE_MIN_FILINGS or len(districts) < 2:
+            continue
+        with open(
+            os.path.join(SITE, "state", f"{code.lower()}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(state_page(code, MULTI_DISTRICT[code], batch))
+        paths.append(f"state/{code.lower()}.html")
+        state_index.append((MULTI_DISTRICT[code], code.lower(), len(batch)))
 
     by_month: dict[str, list[dict]] = {}
     for r in rows:
@@ -1176,6 +1571,11 @@ def main() -> int:
         ) as fh:
             fh.write(month_page(ym, by_month[ym], order))
         paths.append(f"month/{ym}.html")
+
+    # Written after the firm and state pages because it links to them; an index
+    # rendered before they exist would list nothing.
+    with open(os.path.join(SITE, "index.html"), "w", encoding="utf-8") as fh:
+        fh.write(index_page(rows, firm_index, state_index))
 
     # The project's own scoreboard, published on the same terms as the filings.
     # Written last so the corpus figures it reports are this build's, not the
@@ -1194,13 +1594,14 @@ def main() -> int:
                 fh.write(json.dumps(reading, ensure_ascii=False, sort_keys=True) + "\n")
 
     write_data_files(rows)
-    write_feed(rows)
+    write_feed(rows, COURT_PAGES)
     write_sitemap(paths)
     open(os.path.join(SITE, ".nojekyll"), "w").close()
 
     print(
         f"built {len(paths)} pages from {len(rows)} filings "
-        f"({len(by_court)} courts, {len(by_month)} months)"
+        f"({len(by_court)} courts, {len(by_month)} months, "
+        f"{len(firm_index)} firms, {len(state_index)} states)"
     )
     return 0
 
