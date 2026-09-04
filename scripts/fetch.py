@@ -52,6 +52,7 @@ def is_ada(row: dict) -> bool:
         return True
     return nos.startswith("443") and bool(ADA_CAUSE.search(row.get("cause") or ""))
 
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "data")
 
@@ -80,9 +81,18 @@ KEEP = (
 )
 
 
+# Every HTTP call the process makes, counted. The daily ceiling of 125 is the
+# scarcest resource this project has, and a backfill that guesses at what it
+# spent will either stop short of the budget or overrun it. Both were observed:
+# the overrun is what truncated April 2025.
+REQUESTS = 0
+
+
 def get(url: str, tries: int = 5) -> dict:
     """GET with backoff. Anonymous callers are rate-limited; be a good citizen."""
+    global REQUESTS
     for attempt in range(tries):
+        REQUESTS += 1
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
@@ -162,9 +172,19 @@ def save(rows: dict[int, dict]) -> None:
         print(f"  wrote {month}.ndjson ({len(batch)} filings)")
 
 
+# Whether the last crawl ran out of pages allowed rather than out of results.
+# The distinction is the difference between "this is the whole month" and "this
+# is as much of the month as the budget bought", and nothing downstream can
+# recover it after the fact — which is precisely how a truncated April came to
+# be published as a complete one.
+LAST_CRAWL_TRUNCATED = False
+
+
 def crawl(since: str, until: str, max_pages: int) -> list[dict]:
     """Walk the cursor-paginated result set for one nature-of-suit code at a time.
     Splitting the query keeps each result set small enough to page reliably."""
+    global LAST_CRAWL_TRUNCATED
+    LAST_CRAWL_TRUNCATED = False
     found: list[dict] = []
     for nos in SUIT_NATURES:
         params = {
@@ -187,6 +207,9 @@ def crawl(since: str, until: str, max_pages: int) -> list[dict]:
             url = data.get("next")
             if url:
                 time.sleep(PAGE_PAUSE)
+        if url:
+            # There were more pages and we stopped anyway.
+            LAST_CRAWL_TRUNCATED = True
     return found
 
 

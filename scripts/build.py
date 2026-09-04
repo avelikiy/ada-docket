@@ -30,6 +30,10 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import coverage as cov  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "data")
 SITE = os.path.join(ROOT, "site")
@@ -75,6 +79,12 @@ LATEST_FILING = ""
 # emits a 404. Seventy-nine such links shipped before this was caught.
 COURT_PAGES: set[str] = set()
 COURT_MIN_FILINGS = 5
+
+# What we know about how complete each month is, measured against the source by
+# scripts/backfill.py. Empty until the first audit runs, and an empty record
+# means every month is `unknown` — which is what stops a page from asserting a
+# total it cannot back.
+COVERAGE: dict = {}
 
 
 # ---------------------------------------------------------------- data ----
@@ -144,9 +154,32 @@ def court_of(row: dict) -> str:
     return row.get("court_citation_string") or row.get("court") or "—"
 
 
-def weekly(rows: list[dict], weeks: int = 26) -> list[tuple[dt.date, int]]:
-    """Filings per week, oldest first. The current partial week is dropped: a
-    half-counted bar reads as a collapse in filings, which would be a lie."""
+def week_is_recorded(monday: dt.date) -> bool:
+    """Whether we have actually collected the week, as opposed to found it empty.
+
+    A week inherits the coverage of the months it falls in, and it takes only one
+    unrecorded day to make the week's total meaningless. Until the first audit
+    runs nothing is recorded, so every bar is a void — the honest state for a
+    chart that cannot yet tell zero from unread.
+    """
+    days = [monday + dt.timedelta(days=i) for i in range(7)]
+    return all(
+        cov.classify(month_entry(d.isoformat()[:7]), d.isoformat()[:7])
+        in (cov.COMPLETE, cov.CURRENT, cov.RECONCILED)
+        for d in days
+    )
+
+
+def weekly(rows: list[dict], weeks: int = 26) -> list[tuple[dt.date, int, bool]]:
+    """Filings per week, oldest first, each flagged recorded or not.
+
+    The current partial week is dropped: a half-counted bar reads as a collapse
+    in filings, which would be a lie. An unrecorded week is the same lie told
+    about the past — the index drew two flat-zero bars across the weeks of 18 and
+    25 May 2026, which had not fallen to zero but had never been fetched. So a
+    week we have not collected is returned as unrecorded and drawn as a void
+    rather than as a nought.
+    """
     today = dt.date.today()
     this_monday = today - dt.timedelta(days=today.weekday())
     buckets: collections.Counter = collections.Counter()
@@ -159,7 +192,7 @@ def weekly(rows: list[dict], weeks: int = 26) -> list[tuple[dt.date, int]]:
     out = []
     for i in range(weeks, 0, -1):
         monday = this_monday - dt.timedelta(weeks=i)
-        out.append((monday, buckets.get(monday, 0)))
+        out.append((monday, buckets.get(monday, 0), week_is_recorded(monday)))
     # Trim leading empty weeks. Before the record starts an empty bar would read
     # as "no lawsuits that week" when it means "not collected yet".
     while len(out) > 4 and out[0][1] == 0:
@@ -192,10 +225,20 @@ def caption_block(row: dict) -> str:
       </div>"""
 
 
-def bar_strip(series: list[tuple[dt.date, int]]) -> str:
-    peak = max((n for _, n in series), default=1) or 1
+def bar_strip(series: list[tuple[dt.date, int, bool]]) -> str:
+    # An unrecorded week must not set the scale either: a week we never fetched
+    # counts zero, and letting a zero anchor the axis would flatter every bar
+    # next to it.
+    peak = max((n for _, n, known in series if known), default=1) or 1
     bars = []
-    for monday, n in series:
+    for monday, n, known in series:
+        if not known:
+            label = f"Week of {longdate(monday.isoformat())}: not collected"
+            bars.append(
+                f'<div class="bar bar-void" title="{html.escape(label)}">'
+                f'<span class="sr-only">{html.escape(label)}</span></div>'
+            )
+            continue
         label = f"Week of {longdate(monday.isoformat())}: {n} filings"
         bars.append(
             f'<div class="bar" style="--h:{round(100 * n / peak, 1)}%" '
@@ -204,6 +247,15 @@ def bar_strip(series: list[tuple[dt.date, int]]) -> str:
         )
     first = series[0][0] if series else dt.date.today()
     last = series[-1][0] if series else dt.date.today()
+    # A hatched column is unreadable without being told what it is, and "peak
+    # week" is the less useful of the two things this caption could say while
+    # any part of the chart is still unwritten.
+    voids = sum(1 for _, _, known in series if not known)
+    middle = (
+        "Ruled columns are weeks not yet collected"
+        if voids
+        else f"Peak week: {peak} filings"
+    )
     return f"""
       <figure class="trend">
         <div class="bars" role="img" aria-label="Weekly filing counts, {longdate(first.isoformat())} to {longdate(last.isoformat())}">
@@ -211,7 +263,7 @@ def bar_strip(series: list[tuple[dt.date, int]]) -> str:
         </div>
         <figcaption>
           <span>{longdate(first.isoformat())}</span>
-          <span>Peak week: {peak} filings</span>
+          <span>{middle}</span>
           <span>{longdate(last.isoformat())}</span>
         </figcaption>
       </figure>"""
@@ -572,6 +624,7 @@ def index_page(
             <p>State-court actions and demand letters that never become suits are
                invisible entirely, and most access disputes end in a letter. Treat
                every count here as a lower bound.</p>
+            <p>{coverage_summary()}</p>
           </div>
           <div>
             <h3>What a caption cannot tell you</h3>
@@ -579,6 +632,11 @@ def index_page(
                parties, not websites, and does not say what the claim was about — the
                446 code covers every kind of access claim, of which web accessibility
                is one part.</p>
+            <p>A name in a caption is not an identifier. Most of the names that
+               recur here are a bare surname, and the commonest of them belong to
+               several different people: the dockets captioned <i>Fernandez</i> are
+               not one plaintiff. Nothing on this site counts filings by person,
+               and a name should not be read as one.</p>
             <ul class="downloads">
               <li><a href="cases.csv">cases.csv</a> — every tracked filing</li>
               <li><a href="cases.json">cases.json</a> — the same, machine-readable</li>
@@ -642,7 +700,7 @@ def court_page(court_id: str, rows: list[dict]) -> str:
     <div class="stats">
       <div class="stat"><b>{len(rows):,}</b><span>filings tracked here</span></div>
       <div class="stat"><b>{len(firms):,}</b><span>firms of record</span></div>
-      <div class="stat"><b>{len({r.get("plaintiff") for r in rows}):,}</b><span>named plaintiffs</span></div>
+      <div class="stat"><b>{recent_filings(rows, 90):,}</b><span>filed in the past 90 days</span></div>
     </div>
     <section>
       <h2>Filings a week in {html.escape(label)}</h2>
@@ -1113,6 +1171,123 @@ def pulse_page(rows: list[dict], readings: list[dict]) -> str:
     )
 
 
+def recent_filings(rows: list[dict], days: int) -> int:
+    """Filings docketed in the last N days.
+
+    This replaced a stat labelled "named plaintiffs", which counted distinct
+    strings taken from the left of a case caption. Eighty-two per cent of the
+    names that appear ten times or more are a bare surname, and the four
+    commonest each cover several different people — the docket sheets for
+    "Fernandez" name at least four. The label therefore claimed a count of people
+    while reporting a count of strings, on every court page. Rows in a window are
+    a fact about the record and assert nothing about identity.
+    """
+    cutoff = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    return sum(1 for r in rows if (r.get("dateFiled") or "") >= cutoff)
+
+
+def month_entry(ym: str) -> dict | None:
+    return (COVERAGE.get("months") or {}).get(ym)
+
+
+def month_status(ym: str) -> str:
+    return cov.classify(month_entry(ym), ym)
+
+
+def coverage_summary() -> str:
+    """One sentence on the state of the record, for the method section.
+
+    Written from the coverage file rather than from a person's memory of it, so
+    it cannot drift out of date the way a hand-written caveat does — and so it
+    disappears by itself once the backfill has finished its work.
+    """
+    months = COVERAGE.get("months") or {}
+    if not months:
+        return (
+            "Coverage of each month has not yet been checked against the court "
+            "index, so treat the monthly totals as what has been collected rather "
+            "than as the months themselves."
+        )
+    short = [ym for ym in months if cov.classify(months[ym], ym) == cov.PARTIAL]
+    if not short:
+        return (
+            "Every month on this record has been checked against the court index "
+            "and holds what the index reports for it."
+        )
+    held = sum(months[ym].get("have_446", 0) for ym in short)
+    want = sum(months[ym].get("api_446", 0) for ym in short)
+    return (
+        f"{len(short)} of the {len(months)} months here are still being compiled: "
+        f"they hold {held:,} of the {want:,} filings the index reports for them. "
+        f"Those months are marked where they appear, and the daily run keeps "
+        f"fetching until they are whole."
+    )
+
+
+def coverage_gauge(entry: dict) -> str:
+    """A ruled line, the entered part inked and the rest left blank.
+
+    The register already says "we do not have this" with blank ruling on the
+    pulse page. A month half entered is the same statement made about a
+    proportion, so it is drawn the same way rather than as a progress bar, which
+    would read as a task in hand rather than a gap in a record.
+    """
+    share = cov.held_fraction(entry) or 0.0
+    return (
+        f'<div class="gauge" role="img" aria-label="'
+        f'{share * 100:.0f} per cent of this month entered">'
+        f'<span style="width:{share * 100:.1f}%"></span></div>'
+    )
+
+
+def coverage_notice(ym: str, entered: int) -> str:
+    """What this page is allowed to say about its own completeness.
+
+    Silence is not an option here. A month page that says nothing about coverage
+    is exactly what published "25 filings" for a month that had about five
+    hundred: the arithmetic was right and the claim was false, because the page
+    had no way to tell a quiet April from an April it had only read one day of.
+    """
+    entry = month_entry(ym)
+    status = cov.classify(entry, ym)
+
+    if status == cov.PARTIAL:
+        # `entered` is every row this page lists; `api_446` counts the ADA
+        # nature-of-suit code alone. The two bases differ by the handful of
+        # accommodations-code filings that cite the ADA, so the notice states the
+        # figure the page itself shows and calls the index count approximate,
+        # rather than printing a second, slightly different total beside it.
+        api = entry["api_446"]
+        return (
+            f'<div class="gap" role="status">'
+            f"<p><b>Partly entered.</b> This record holds {entered:,} of the "
+            f"roughly {api:,} filings the court index reports for {monthname(ym)}. "
+            f"The counts and rankings below describe what has been entered, not "
+            f"the month. The daily run keeps fetching until the month is whole.</p>"
+            f"{coverage_gauge(entry)}"
+            f"</div>"
+        )
+
+    if status == cov.UNKNOWN:
+        return (
+            '<div class="gap gap-quiet" role="status">'
+            f"<p><b>Not yet checked against the index.</b> {monthname(ym)} has not "
+            f"been measured against the court index, so this page can say what it "
+            f"holds but not whether that is the whole month.</p>"
+            "</div>"
+        )
+
+    if status == cov.CURRENT:
+        return (
+            '<div class="gap gap-quiet" role="status">'
+            f"<p><b>Month in progress.</b> {monthname(ym)} is still running, so "
+            f"these are the filings docketed so far.</p>"
+            "</div>"
+        )
+
+    return ""
+
+
 def month_page(ym: str, rows: list[dict], order: list[str]) -> str:
     courts = collections.Counter(
         (court_of(r), r.get("court_id") or "unknown") for r in rows
@@ -1132,12 +1307,34 @@ def month_page(ym: str, rows: list[dict], order: list[str]) -> str:
         if i < len(order) - 1
         else ""
     )
-    body = f"""
-  <div class="wrap">
-    <div class="stats">
+    entry = month_entry(ym)
+    status = cov.classify(entry, ym)
+    days = cov.month_days(ym)
+
+    # On a month we know is short, the source's count leads and ours is shown as
+    # the shortfall. Putting our count first and footnoting the truth would still
+    # hand the reader the wrong headline number, which is the whole defect.
+    if status == cov.PARTIAL:
+        stats = f"""
+      <div class="stat"><b>~{entry["api_446"]:,}</b><span>filings the index reports</span></div>
+      <div class="stat"><b>{len(rows):,}</b><span>entered on this record</span></div>
+      <div class="stat"><b>{len(courts):,}</b><span>district courts so far</span></div>"""
+    else:
+        # A rate needs a denominator that is actually elapsed. Dividing by a flat
+        # thirty overstated February and understated the long months, and on a
+        # month still running it divides by days that have not happened.
+        elapsed = days
+        if status == cov.CURRENT:
+            elapsed = max(1, min(days, dt.date.today().day))
+        stats = f"""
       <div class="stat"><b>{len(rows):,}</b><span>filings this month</span></div>
       <div class="stat"><b>{len(courts):,}</b><span>district courts</span></div>
-      <div class="stat"><b>{round(len(rows) / 30, 1)}</b><span>a day</span></div>
+      <div class="stat"><b>{round(len(rows) / elapsed, 1)}</b><span>a day</span></div>"""
+
+    body = f"""
+  <div class="wrap">
+    {coverage_notice(ym, len(rows))}
+    <div class="stats">{stats}
     </div>
     <section>
       <h2>Where they landed</h2>
@@ -1151,18 +1348,50 @@ def month_page(ym: str, rows: list[dict], order: list[str]) -> str:
     </section>
     <nav class="pager">{prev_link}{next_link}</nav>
   </div>"""
-    return page(
-        title=f"ADA Title III lawsuits filed in {monthname(ym)}",
-        description=(
+    # The description is what a search engine quotes, so it carries the same
+    # caveat as the page. A snippet reading "The 25 lawsuits filed in April 2025"
+    # is the false claim travelling without the page that qualifies it.
+    if status == cov.PARTIAL:
+        description = (
+            f"{len(rows):,} of roughly {entry['api_446']:,} federal Americans with "
+            f"Disabilities Act Title III lawsuits filed in {monthname(ym)}, entered "
+            f"so far across {len(courts)} district courts. This month is still "
+            f"being compiled."
+        )
+        standfirst = (
+            f"{len(rows):,} of roughly {entry['api_446']:,} filings entered, "
+            f"across {len(courts)} district courts."
+        )
+    elif status == cov.UNKNOWN:
+        # We hold 25 rows and do not know whether the month had 25 or 500. "The
+        # 25 lawsuits" would assert the second half of that; "25 recorded so far"
+        # asserts only the first.
+        description = (
+            f"{len(rows):,} federal Americans with Disabilities Act Title III "
+            f"lawsuits recorded so far for {monthname(ym)}, across "
+            f"{len(courts)} district courts. Coverage for this month has not yet "
+            f"been checked against the court index."
+        )
+        standfirst = (
+            f"{len(rows):,} filings recorded so far, across "
+            f"{len(courts)} district courts."
+        )
+    else:
+        description = (
             f"The {len(rows):,} federal Americans with Disabilities Act Title III "
             f"lawsuits tracked for {monthname(ym)}, across {len(courts)} district "
             f"courts. Defendants, courts and docket numbers, free to download."
-        ),
+        )
+        standfirst = f"{len(rows):,} filings across {len(courts)} district courts."
+
+    return page(
+        title=f"ADA Title III lawsuits filed in {monthname(ym)}",
+        description=description,
         depth="../",
         canonical=f"month/{ym}.html",
         crumb='<a href="../index.html">The record</a> → ' + monthname(ym),
         heading=f"Filings in {monthname(ym)}",
-        standfirst=f"{len(rows):,} filings across {len(courts)} district courts.",
+        standfirst=standfirst,
         body=body,
     )
 
@@ -1244,8 +1473,10 @@ h3 { font-size:1rem; font-weight:400; margin:0 0 .9rem; padding-bottom:.4rem;
 .trend { margin:0; }
 .bars { display:flex; align-items:flex-end; gap:2px; height:9rem;
         border-bottom:1px solid var(--ink); }
-.bar { flex:1; height:var(--h); min-height:1px; background:var(--seal); }
-.bar:nth-last-child(-n+4) { background:var(--stamp); }
+.bar { flex:1; height:var(--h); min-height:1px; background:var(--seal); }\n/* A week never fetched. Drawn full height in blank ruling so it reads as an\n   unwritten column rather than a week in which nobody sued. */\n.bar-void { height:100%; background:repeating-linear-gradient(to bottom,\n  transparent 0 .34rem, var(--rule) .34rem .38rem); opacity:.55; }
+/* The four most recent weeks are marked — but only weeks we actually have.
+   Marking a ruled column paints "most recent" over "not collected", and the
+   pseudo-class outranks .bar-void, so the exclusion belongs here. */\n.bar:not(.bar-void):nth-last-child(-n+4) { background:var(--stamp); }
 .trend figcaption { display:flex; justify-content:space-between; gap:1rem;
                     margin-top:.5rem; color:var(--ink-soft); font-size:.85rem; }
 
@@ -1258,7 +1489,13 @@ h3 { font-size:1rem; font-weight:400; margin:0 0 .9rem; padding-bottom:.4rem;
 .lb-name { font-size:.95rem; overflow-wrap:anywhere; }
 .lb-bar { height:6px; background:var(--seal); width:var(--w); justify-self:start; }
 .lb-n { font-family:var(--mono); font-size:.85rem; text-align:right; color:var(--ink-soft); }
-.inline-index { max-width:none; line-height:2; }\n.dim { color:var(--ink-soft); font-family:var(--mono); font-size:.8rem; }\n.stale { margin:1.25rem 0 0; padding:.85rem 1rem; background:var(--paper-2);\n  border-left:4px solid var(--stamp); color:var(--ink); font-size:.95rem;\n  max-width:46rem; }\n.note { font-size:.82rem; color:var(--ink-soft); margin:.75rem 0 0; }
+.inline-index { max-width:none; line-height:2; }\n.dim { color:var(--ink-soft); font-family:var(--mono); font-size:.8rem; }\n.stale { margin:1.25rem 0 0; padding:.85rem 1rem; background:var(--paper-2);\n  border-left:4px solid var(--stamp); color:var(--ink); font-size:.95rem;\n  max-width:46rem; }\n.note { font-size:.82rem; color:var(--ink-soft); margin:.75rem 0 0; }\n
+/* Incompleteness of the record, which is a different thing from the site having
+   stopped updating. `.stale` owns the oxblood rule and says "nothing new is
+   arriving"; this says "this month is not all here yet". Two problems a reader
+   must be able to tell apart, so they carry different marks. */\n.gap { margin:1.5rem 0 0; padding:.9rem 1.1rem; background:var(--paper-2);\n  border-left:4px solid var(--seal); max-width:46rem; }\n.gap p { margin:0; font-size:.95rem; }\n.gap b { font-weight:400; text-decoration:underline;\n  text-decoration-thickness:1px; text-underline-offset:3px; }\n.gap-quiet { border-left-color:var(--rule); color:var(--ink-soft); }\n
+/* The entered share written on a ruled line: ink where the record is filled,
+   blank ruling where it is not, matching the void on the pulse page. */\n.gauge { position:relative; height:.5rem; margin-top:.7rem;\n  background:repeating-linear-gradient(to bottom,\n    transparent 0 .22rem, var(--rule) .22rem .28rem); }\n.gauge span { position:absolute; inset:0 auto 0 0; background:var(--seal); }
 
 .filter { display:flex; flex-wrap:wrap; gap:.75rem; align-items:baseline;
           margin-bottom:1rem; }
@@ -1474,6 +1711,9 @@ def main() -> int:
     rows = load()
     global LATEST_FILING
     LATEST_FILING = max((r.get("dateFiled") or "" for r in rows), default="")
+
+    COVERAGE.clear()
+    COVERAGE.update(cov.load())
 
     counts: collections.Counter = collections.Counter(
         r.get("court_id") or "unknown" for r in rows

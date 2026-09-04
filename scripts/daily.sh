@@ -48,6 +48,27 @@ else
   say "fetch     FAILED"; status=1
 fi
 
+# Measure how much of each month we hold, then spend what is left of the day's
+# request allowance closing the largest hole. Both are resumable and both stop
+# on their own at the budget, so this stage takes what time it takes and never
+# starves tomorrow's fetch — the reserve is held back inside backfill.py.
+#
+# This is what makes the twelve-month gap close without anybody driving it. A
+# backfill run by hand is what left April 2025 one day long, because a person
+# ran it, hit the ceiling, and never came back to finish.
+if python3 scripts/backfill.py >>"$LOG" 2>&1; then
+  say "backfill  ok"
+else
+  # Exit 2 is the documented rate-limit stop, which is an ordinary outcome
+  # here, not a failure: the run simply resumes tomorrow.
+  rc=$?
+  if [ "$rc" = "2" ]; then
+    say "backfill  rate limit — resumes tomorrow"
+  else
+    say "backfill  FAILED"; status=1
+  fi
+fi
+
 if python3 scripts/pulse.py >>"$LOG" 2>&1; then
   say "pulse     ok"
 else

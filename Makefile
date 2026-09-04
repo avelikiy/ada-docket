@@ -4,7 +4,7 @@ export SITE_URL
 
 # Everything below runs on a stock Python 3.9+ with no dependencies.
 
-.PHONY: update pulse build serve publish daily backfill schedule unschedule schedule-status
+.PHONY: update pulse build serve publish daily backfill coverage plan test schedule unschedule schedule-status
 
 REPO_DIR := $(shell pwd)
 PLIST    := $(HOME)/Library/LaunchAgents/com.ada-docket.daily.plist
@@ -61,8 +61,19 @@ schedule-status:   ## is the local schedule installed and loaded?
 	  | awk '/state = |last exit code|run count/ {gsub(/^ +/,""); print "agent   " $$0}' \
 	  || echo "agent   not loaded"
 
-# Backfill one month at a time. CourtListener allows five requests a minute, so
-# a month takes a few minutes; that is the polite pace, not a bug.
-#   make backfill FROM=2025-05-01 TO=2025-06-01
+# Close the holes in the record. Resumable and budget-aware: it measures each
+# month against the court index, then spends what is left of the day's request
+# allowance on the emptiest month and stops. Running it again tomorrow continues
+# from data/coverage.json. The daily job already does this, so run it by hand
+# only to hurry things along.
 backfill:
-	python3 scripts/fetch.py --since $(FROM) --until $(TO) --max-pages 120
+	python3 scripts/backfill.py
+
+coverage:          ## what we hold per month, measured against the court index
+	python3 scripts/backfill.py --audit-only
+
+plan:              ## what the backfill would do next, spending nothing
+	python3 scripts/backfill.py --plan
+
+test:              ## the whole suite; standard library, nothing to install
+	python3 -m unittest discover -s tests -v
