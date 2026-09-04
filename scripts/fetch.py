@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Incremental ingest of federal ADA Title III filings from the CourtListener API.
+
+Source: https://www.courtlistener.com/api/rest/v4/search/?type=r
+The v4 search endpoint serves RECAP dockets to anonymous clients. Federal court
+records are public; CourtListener is credited on every row of the published site.
+
+Writes newline-delimited JSON to data/cases.ndjson, keyed on docket_id so that
+re-running the job never duplicates a case. Standard library only: the daily job
+runs on a stock GitHub Actions runner with no install step.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import sys
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+API = "https://www.courtlistener.com/api/rest/v4/search/"
+
+# CourtListener documents 5 requests a minute, 50 an hour, 125 a day. Backfilling
+# at any faster pace earns a 429 — observed, not assumed. One request per 13
+# seconds stays inside the per-minute limit. The daily job needs about four
+# requests, so it is nowhere near any of the three ceilings; only a backfill is
+# slow, and a backfill runs once.
+PAGE_PAUSE = 13.0
+UA = "ada-docket/0.1 (open dataset of ADA Title III filings; +https://github.com/)"
+
+# Nature of suit codes queried.
+#   446 — Civil Rights: Americans with Disabilities - Other  (where web cases land)
+#   443 — Civil Rights: Accommodations
+SUIT_NATURES = ("446", "443")
+
+# 443 is NOT an ADA-only code. Clerks file Fair Housing Act, section 1983 and
+# Title VII matters under it too, and publishing those under an "ADA Title III"
+# heading would misstate what a named person was sued over. A 443 docket is only
+# kept when its cause of action cites the ADA itself (42 U.S.C. 12101 et seq.).
+# 446 is the ADA code by definition and is kept as it stands.
+ADA_CAUSE = re.compile(r"\b42:12\d{3}\b")
+
+
+def is_ada(row: dict) -> bool:
+    nos = (row.get("suitNature") or "").strip()
+    if nos.startswith("446"):
+        return True
+    return nos.startswith("443") and bool(ADA_CAUSE.search(row.get("cause") or ""))
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(ROOT, "data")
+
+# The record is partitioned by filing month, one file per month. A single
+# combined file would be rewritten in full every day, and three years of daily
+# rewrites of a multi-megabyte blob turns the git history into tens of
+# gigabytes. Partitioned, only the current month's file changes each day and
+# closed months never move again.
+
+KEEP = (
+    "docket_id",
+    "caseName",
+    "court",
+    "court_id",
+    "court_citation_string",
+    "dateFiled",
+    "docketNumber",
+    "suitNature",
+    "cause",
+    "jurisdictionType",
+    "docket_absolute_url",
+    "party",
+    "attorney",
+    "firm",
+    "assignedTo",
+)
+
+
+def get(url: str, tries: int = 5) -> dict:
+    """GET with backoff. Anonymous callers are rate-limited; be a good citizen."""
+    for attempt in range(tries):
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < tries - 1:
+                wait = 60 * (attempt + 1) if e.code == 429 else 5 * (attempt + 1)
+                print(f"  HTTP {e.code}, retrying in {wait}s", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise
+        except urllib.error.URLError:
+            if attempt < tries - 1:
+                time.sleep(10 * (attempt + 1))
+                continue
+            raise
+    raise RuntimeError("unreachable")
+
+
+def slim(row: dict) -> dict:
+    """Keep the fields the site actually renders. Drops recap_documents, which is
+    the bulk of the payload and is not used downstream."""
+    out = {k: row.get(k) for k in KEEP}
+    # Defendant = the last named party in the caption ("Smith v. Acme Corp").
+    name = out.get("caseName") or ""
+    out["defendant"] = name.split(" v. ")[-1].strip() if " v. " in name else ""
+    out["plaintiff"] = name.split(" v. ")[0].strip() if " v. " in name else ""
+    return out
+
+
+def partition(row: dict) -> str:
+    """Month a filing belongs to. Rows with no usable filing date go to a
+    quarantine file rather than being silently dropped."""
+    d = row.get("dateFiled") or ""
+    return d[:7] if len(d) >= 7 and d[4] == "-" else "unknown"
+
+
+def load() -> dict[int, dict]:
+    seen: dict[int, dict] = {}
+    if not os.path.isdir(DATA_DIR):
+        return seen
+    for name in sorted(os.listdir(DATA_DIR)):
+        if not name.endswith(".ndjson"):
+            continue
+        with open(os.path.join(DATA_DIR, name), encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                seen[row["docket_id"]] = row
+    return seen
+
+
+def save(rows: dict[int, dict]) -> None:
+    """Rewrite only the month files that actually changed, so a daily run leaves
+    closed months byte-identical and git records nothing for them."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    months: dict[str, list[dict]] = {}
+    for row in rows.values():
+        months.setdefault(partition(row), []).append(row)
+
+    for month, batch in months.items():
+        batch.sort(key=lambda r: (r.get("dateFiled") or "", r.get("docket_id") or 0))
+        body = "".join(
+            json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in batch
+        )
+        path = os.path.join(DATA_DIR, f"{month}.ndjson")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                if fh.read() == body:
+                    continue
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        os.replace(tmp, path)
+        print(f"  wrote {month}.ndjson ({len(batch)} filings)")
+
+
+def crawl(since: str, until: str, max_pages: int) -> list[dict]:
+    """Walk the cursor-paginated result set for one nature-of-suit code at a time.
+    Splitting the query keeps each result set small enough to page reliably."""
+    found: list[dict] = []
+    for nos in SUIT_NATURES:
+        params = {
+            "type": "r",
+            "q": f"suitNature:({nos})",
+            "filed_after": since,
+            "filed_before": until,
+            "order_by": "dateFiled desc",
+        }
+        url = API + "?" + urllib.parse.urlencode(params)
+        pages = 0
+        while url and pages < max_pages:
+            data = get(url)
+            batch = data.get("results", [])
+            found.extend(batch)
+            pages += 1
+            print(
+                f"  nos={nos} page {pages}: +{len(batch)} (total reported {data.get('count')})"
+            )
+            url = data.get("next")
+            if url:
+                time.sleep(PAGE_PAUSE)
+    return found
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="look-back window in days (default 7; the daily job "
+        "overlaps so late-indexed dockets are still caught)",
+    )
+    ap.add_argument("--since", help="explicit YYYY-MM-DD start, overrides --days")
+    ap.add_argument("--until", help="explicit YYYY-MM-DD end, defaults to today")
+    ap.add_argument("--max-pages", type=int, default=40)
+    args = ap.parse_args()
+
+    today = dt.date.today()
+    since = args.since or (today - dt.timedelta(days=args.days)).isoformat()
+    until = args.until or today.isoformat()
+
+    print(f"ada-docket: fetching filings {since} .. {until}")
+    existing = load()
+    print(f"  {len(existing)} cases already on disk")
+
+    raw = crawl(since, until, args.max_pages)
+
+    added = 0
+    dropped = 0
+    for row in raw:
+        did = row.get("docket_id")
+        if did is None:
+            continue
+        if not is_ada(row):
+            dropped += 1
+            continue
+        rec = slim(row)
+        if did not in existing:
+            rec["first_seen"] = until
+            added += 1
+        else:
+            rec["first_seen"] = existing[did].get("first_seen", until)
+        existing[did] = rec
+
+    save(existing)
+    print(f"  {dropped} non-ADA dockets dropped from the 443 code")
+    print(f"  +{added} new, {len(existing)} total in {DATA_DIR}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
