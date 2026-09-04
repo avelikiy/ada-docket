@@ -25,12 +25,68 @@ import urllib.request
 
 API = "https://www.courtlistener.com/api/rest/v4/search/"
 
-# CourtListener documents 5 requests a minute, 50 an hour, 125 a day. Backfilling
-# at any faster pace earns a 429 — observed, not assumed. One request per 13
-# seconds stays inside the per-minute limit. The daily job needs about four
-# requests, so it is nowhere near any of the three ceilings; only a backfill is
-# slow, and a backfill runs once.
+# CourtListener documents three ceilings: 5 requests a minute, 50 an hour, 125 a
+# day. A 13-second pause honours the first and quietly breaks the second — it
+# works out at 277 requests an hour. That is why the original backfill died
+# part-way through April 2025 and left the month one day long: it was not the
+# daily ceiling that stopped it but the hourly one, about fifty requests in, and
+# the 429s that followed looked like a hang rather than a limit.
+#
+# So the spacing is a floor, not the whole policy, and the hourly ceiling is
+# enforced below on a rolling window. The daily job makes about four requests
+# and never notices either.
 PAGE_PAUSE = 13.0
+
+# Requests allowed per rolling hour, against a documented fifty. The margin
+# covers the daily fetch running alongside a backfill.
+HOURLY_MAX = 45
+
+# The window has to outlive the process. The daily loop runs the fetch and the
+# backfill as two separate programs within a minute of each other, and a limiter
+# that starts empty in each of them would let the pair spend ninety requests in
+# an hour while both believed they were being careful.
+_WINDOW_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", ".requests"
+)
+
+
+def _read_window() -> list[float]:
+    try:
+        with open(_WINDOW_PATH, encoding="utf-8") as fh:
+            stamps = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    cutoff = time.time() - 3600
+    return [t for t in stamps if isinstance(t, (int, float)) and t > cutoff]
+
+
+def _await_slot() -> None:
+    """Block until a request would stay inside the hourly ceiling.
+
+    Enforced here rather than at the call sites so no caller can get it wrong:
+    the audit and the crawl draw on the same allowance, and pacing each of them
+    correctly on its own would still breach the limit together.
+    """
+    while True:
+        stamps = _read_window()
+        if len(stamps) < HOURLY_MAX:
+            stamps.append(time.time())
+            try:
+                os.makedirs(os.path.dirname(_WINDOW_PATH), exist_ok=True)
+                with open(_WINDOW_PATH, "w", encoding="utf-8") as fh:
+                    json.dump(stamps, fh)
+            except OSError:
+                pass  # pacing is best-effort; never fail a fetch over bookkeeping
+            return
+        wait = 3600 - (time.time() - min(stamps)) + 1
+        print(
+            f"  hourly ceiling reached ({HOURLY_MAX}/h); waiting {wait / 60:.0f} min",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(max(1.0, wait))
+
+
 UA = "ada-docket/0.1 (open dataset of ADA Title III filings; +https://github.com/)"
 
 # Nature of suit codes queried.
@@ -92,6 +148,7 @@ def get(url: str, tries: int = 5) -> dict:
     """GET with backoff. Anonymous callers are rate-limited; be a good citizen."""
     global REQUESTS
     for attempt in range(tries):
+        _await_slot()
         REQUESTS += 1
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         try:

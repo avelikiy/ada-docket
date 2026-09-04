@@ -1214,13 +1214,35 @@ def coverage_summary() -> str:
             "Every month on this record has been checked against the court index "
             "and holds what the index reports for it."
         )
-    held = sum(months[ym].get("have_446", 0) for ym in short)
-    want = sum(months[ym].get("api_446", 0) for ym in short)
+    # A month holding nothing has no page at all, so calling it "partly entered"
+    # would send a reader looking for something that is not there. The two cases
+    # read differently and are counted separately.
+    absent = [ym for ym in short if not months[ym].get("have_446")]
+    thin = [ym for ym in short if months[ym].get("have_446")]
+    missing = sum(months[ym].get("api_446", 0) for ym in short) - sum(
+        months[ym].get("have_446", 0) for ym in thin
+    )
+
+    parts = []
+    if absent:
+        span = f"{monthname(min(absent))} to {monthname(max(absent))}"
+        parts.append(
+            f"{len(absent)} months have not been collected at all"
+            + (f" ({span})" if len(absent) > 1 else f" ({monthname(absent[0])})")
+        )
+    if thin:
+        parts.append(
+            f"{len(thin)} more "
+            + ("are" if len(thin) > 1 else "is")
+            + " only partly entered ("
+            + ", ".join(monthname(ym) for ym in sorted(thin))
+            + ")"
+        )
     return (
-        f"{len(short)} of the {len(months)} months here are still being compiled: "
-        f"they hold {held:,} of the {want:,} filings the index reports for them. "
-        f"Those months are marked where they appear, and the daily run keeps "
-        f"fetching until they are whole."
+        "The record does not yet run unbroken: "
+        + ", and ".join(parts)
+        + f". About {missing:,} filings are missing in total. The daily run keeps "
+        f"fetching until the record is whole, and every page says where it stands."
     )
 
 

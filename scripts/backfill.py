@@ -3,17 +3,17 @@
 
 There is a twelve-month hole between May 2025 and April 2026, and two months
 that stop partway through. Both came from the same place: a backfill was started
-by hand, ran into the anonymous ceiling of 125 requests a day, and stopped. What
+by hand, ran into the hourly ceiling of fifty requests, and stopped. What
 it left behind was not an error message but a plausible-looking short month, and
 the site published that as fact for a cycle.
 
 A backfill that cannot finish in one sitting is the normal case here, not the
 exception. May 2025 alone reports 502 filings, and the search endpoint serves
-twenty to a page, so a single month costs roughly twenty-six requests and the
-whole hole costs about three hundred and sixty. That is three days of budget. So
-this is written to be stopped: every month it finishes is recorded, every run
-resumes from the record, and running out of budget is an ordinary outcome that
-prints a plan rather than a traceback.
+twenty to a page, so a single month costs roughly twenty-nine requests and the
+whole hole costs about four hundred. Against forty-five requests an hour that is
+several nights' work. So this is written to be stopped: every month it finishes
+is recorded, every run resumes from the record, and running out of budget is an
+ordinary outcome that prints a plan rather than a traceback.
 
 Two phases, in this order, because the order is what makes it cheap:
 
@@ -52,6 +52,13 @@ import fetch  # noqa: E402
 # wrong trade for a site whose entire claim is that it is current.
 DAILY_CEILING = 125
 RESERVED_FOR_DAILY_FETCH = 20
+
+# The hourly ceiling, not the daily one, sets how long a run takes: 45 requests
+# an hour means the full daily allowance would keep the job running for well
+# over two hours. Two hours' worth is the cap, so a nightly run finishes in a
+# predictable window and the rest waits for tomorrow. Nothing is lost by
+# stopping — that is what the coverage record is for.
+PER_RUN_MAX = 2 * fetch.HOURLY_MAX
 
 
 def data_months() -> list[str]:
@@ -159,9 +166,18 @@ def repair(doc: dict, ym: str, budget: int) -> tuple[int, int]:
     late into a window we had already passed.
     """
     since, until = coverage.month_bounds(ym)
-    # Each page is one request; the crawl walks two nature-of-suit codes.
-    max_pages = max(1, budget // len(fetch.SUIT_NATURES))
-    print(f"  repairing {ym} ({since} .. {until}), up to {budget} requests")
+    # The page ceiling is per nature-of-suit code, and the two codes are nothing
+    # like the same size: a month holds five hundred 446 dockets and a handful of
+    # 443 ones. Splitting the budget evenly between them gave 446 sixteen pages
+    # where it needed twenty-six, so every repair truncated by construction and
+    # the month it had just crawled stayed short. The ceiling is sized to the
+    # month instead, and the caller has already checked the budget can afford it.
+    entry = doc.get("months", {}).get(ym, {})
+    max_pages = -(-(entry.get("api_446") or 0) // PAGE_SIZE) + NOS_443_PAGES
+    # Still bounded by what the caller allowed, so a month whose count has grown
+    # since the audit cannot quietly spend more than the run was given.
+    max_pages = max(1, min(max_pages, budget))
+    print(f"  repairing {ym} ({since} .. {until}), up to {max_pages} pages a code")
 
     before = fetch.load()
     mark = fetch.REQUESTS
@@ -195,7 +211,6 @@ def repair(doc: dict, ym: str, budget: int) -> tuple[int, int]:
 
     rows = rows_for(ym)
     have = coverage.count_446(rows)
-    entry = doc.get("months", {}).get(ym, {})
     last = max((r.get("dateFiled") or "" for r in rows), default="") or None
     coverage.record(
         doc,
@@ -242,7 +257,7 @@ def main() -> int:
 
     already = spent_today(doc, today.isoformat())
     allowance = DAILY_CEILING - RESERVED_FOR_DAILY_FETCH - already
-    budget = args.budget if args.budget is not None else allowance
+    budget = args.budget if args.budget is not None else min(allowance, PER_RUN_MAX)
     budget = max(0, budget)
 
     print(f"ada-docket backfill · {today}")
@@ -251,7 +266,7 @@ def main() -> int:
         f"  months missing   {len(gap)}" + (f"  ({gap[0]} .. {gap[-1]})" if gap else "")
     )
     print(f"  spent today      {already}/{DAILY_CEILING - RESERVED_FOR_DAILY_FETCH}")
-    print(f"  budget this run  {budget}")
+    print(f"  budget this run  {budget} (about {budget / fetch.HOURLY_MAX:.1f} h)")
 
     if args.plan:
         needs = coverage.months_needing_work(doc, all_months, today)

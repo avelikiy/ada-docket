@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .great_cto/
+
+# Rolling record of API request times, used to honour the hourly rate ceiling
+# across processes. Local pacing state, not part of the record.
+data/.requests
