@@ -80,3 +80,23 @@ This is a mirror of the public docket, published for research. It is not legal
 advice and it is not a consumer report: it must not be used to make decisions
 about any individual's credit, employment, housing, or insurance. Court records
 contain errors. Verify against the docket before relying on anything here.
+
+## Publishing
+
+The site is served from the `gh-pages` branch. `make publish` renders `site/` and
+force-pushes it there; `make daily` does the whole loop — fetch, commit the
+record, render, publish.
+
+The `daily` workflow does the same thing on a schedule. Branch-based Pages was
+chosen over an Actions artifact deliberately: it keeps `make publish` working
+from any machine, so the site does not depend on the repository's Actions
+availability.
+
+### Known gap
+
+Requests run unauthenticated against CourtListener's public API. That is inside
+the documented limits for the daily job — about four requests against a ceiling
+of 125 a day — but a backfill is throttled hard, and Free Law Project asks
+anyone building a product on the API to arrange a commercial agreement first.
+Registering an API token, and opening that conversation before any paid use, is
+outstanding.
