@@ -54,21 +54,24 @@
     },
     "2025-09": {
       "api_446": 471,
-      "checked": "2026-09-04T06:59:21Z",
-      "have_446": 0,
-      "last_filing": null
+      "checked": "2026-09-06T11:28:34Z",
+      "full_crawl": true,
+      "have_446": 471,
+      "last_filing": "2025-09-30"
     },
     "2025-10": {
       "api_446": 490,
-      "checked": "2026-09-04T06:59:37Z",
-      "have_446": 0,
-      "last_filing": null
+      "checked": "2026-09-06T12:23:52Z",
+      "full_crawl": true,
+      "have_446": 490,
+      "last_filing": "2025-10-31"
     },
     "2025-11": {
       "api_446": 348,
-      "checked": "2026-09-04T06:59:51Z",
-      "have_446": 0,
-      "last_filing": null
+      "checked": "2026-09-06T12:29:34Z",
+      "full_crawl": true,
+      "have_446": 348,
+      "last_filing": "2025-11-30"
     },
     "2025-12": {
       "api_446": 297,
@@ -132,7 +135,8 @@
     }
   },
   "spend": {
-    "2026-09-04": 101
+    "2026-09-04": 101,
+    "2026-09-06": 76
   },
   "version": 1
 }
