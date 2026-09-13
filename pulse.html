@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse — how this record is doing, and what it cannot see</title>
+<meta name="description" content="Daily readings for the ADA Title III filings record: feed subscribers, repository signals, corpus size — and an explicit account of the figures a static site cannot measure.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23eaebe5'/%3E%3Cpath d='M5 2v12M9 3.2q2 4.8 0 9.6' stroke='%23131a26' stroke-width='1.4' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<link rel="alternate" type="application/rss+xml" title="ADA Title III filings" href="feed.xml">
+<link rel="canonical" href="https://avelikiy.github.io/ada-docket/pulse.html">
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="masthead">
+      <h1><a href="index.html">ADA Title&nbsp;III filings</a></h1>
+      <p>Every federal disability-access lawsuit as it reaches the public docket.
+         Read the record, take the data, no account.</p>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    
+    <nav class="crumb" aria-label="Breadcrumb"><a href="index.html">The record</a> · Pulse</nav>
+    <div class="page-head">
+      <h2 class="page-title">Pulse</h2>
+      <p class="standfirst">What this project can measure about itself, what it cannot, and the condition under which it closes.</p>
+    </div>
+  </div>
+  
+  <section class="wrap">
+    <div class="stats">
+      <div class="stat"><b>0</b><span>feed subscribers</span></div>
+      <div class="stat"><b>—</b><span>readers of this site</span></div>
+      <div class="stat"><b>9</b><span>days since the first reading</span></div>
+      <div class="stat"><b>8,869</b><span>filings on the record</span></div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2>The closing condition</h2>
+    <p>Fewer than fifty subscribers, or fewer than a hundred and twenty unique
+       readers, ninety days after launch, and this project closes. That was
+       written down before launch so it could not be softened afterwards to suit
+       whatever the numbers turned out to be.</p>
+    <p>Half of it cannot be evaluated. Unique readers are not observable from a
+       static site at no cost, which we established only after setting the
+       condition. The subscriber half stands and is read below. The reader half
+       is void, and calling it void is more useful than substituting a number
+       that looks like it but is not.</p>
+    <p>The half that survives only works in one direction, which is the worse
+       problem. Fifty subscribers would prove the record is read. Fewer than
+       fifty proves nothing: the count covers one reader app, so the true
+       figure is always this or higher and never lower. A condition that can
+       confirm continuing but can never confirm closing is not a brake. It is
+       the bias it was written to prevent, wearing the brake's clothes — on day
+       ninety it produces ninety rows of nulls and the sentence "the data were
+       incomplete, give it another quarter".</p>
+    <p>So the condition is amended here, in public, before there is any number
+       to suit. Two free instruments would make it two-sided — Search Console,
+       verified by uploading a file to this site, and Cloudflare Web Analytics,
+       which needs no domain change — and each costs one person about five
+       minutes in a browser. Neither can be set up from inside this project.
+       <strong>If neither is connected by day ninety, the project closes on that
+       fact alone</strong>, without waiting for a number. Ninety days spent
+       blind is the outcome worth avoiding, not a low score.</p>
+  </section>
+
+  <section class="wrap">
+    <h2>What is observed</h2>
+    <p>Each of these is free, needs no account, and is recorded once a day by
+       the same job that fetches the filings.</p>
+    <div class="ledger">
+      <div class="led">
+        <p class="led-name">Feed subscribers</p>
+        <p class="led-value">0</p>
+        <p class="led-how">Feedly&#x27;s public count for this feed, no account needed.</p>
+        <p class="led-gloss">Counts Feedly&#x27;s readers only, so the real figure is this or higher, never lower.</p>
+      </div>
+      <div class="led">
+        <p class="led-name">Repository stars</p>
+        <p class="led-value">0</p>
+        <p class="led-how">github.com, public.</p>
+        <p class="led-gloss">Kept for completeness. We measured in cycle three that GitHub is not a discovery channel, and nothing here is expected to move.</p>
+      </div>
+      <div class="led">
+        <p class="led-name">Repository visitors</p>
+        <p class="led-value">1</p>
+        <p class="led-how">GitHub&#x27;s traffic API, rolling fourteen days.</p>
+        <p class="led-gloss">Visitors to the repository page. Not readers of this site — GitHub reports nothing about Pages traffic.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2>What nothing reports</h2>
+    <p>These are the figures the project wanted and cannot have. They are ruled
+       and left blank rather than filled with a proxy, because a proxy in this
+       column is how a closing condition quietly stops meaning anything.</p>
+    <div class="ledger ledger-void">
+      <div class="led led-blank">
+        <p class="led-name">Readers of this site</p>
+        <p class="led-value led-void"><span class="sr-only">no reading</span></p>
+        <p class="led-how">Nothing reports it.</p>
+        <p class="led-gloss">A static site on github.io writes no logs, and GitHub publishes no traffic figures for Pages. Measuring it would take a server, a paid analytics account, or a Search Console sign-in. This project has none of the three, so the line stays empty rather than guessed at.</p>
+      </div>
+      <div class="led led-blank">
+        <p class="led-name">Search impressions</p>
+        <p class="led-value led-void"><span class="sr-only">no reading</span></p>
+        <p class="led-how">Nothing reports it.</p>
+        <p class="led-gloss">Same gap. Search Console would answer it and needs a person to verify the property once.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2>Every reading</h2>
+    <p>One row a day, written by the same job that fetches the filings. The
+       record of what we watched is public for the same reason the filings
+       are.</p>
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Date</th><th>Subscribers</th><th>Stars</th><th>Repo visitors</th><th>Filings</th><th>Pages</th></tr></thead>
+        <tbody>
+<tr><td class="c-date">2026-09-13</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">1</td><td class="c-no">8,869</td><td class="c-no">283</td></tr>
+<tr><td class="c-date">2026-09-12</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">8,869</td><td class="c-no">283</td></tr>
+<tr><td class="c-date">2026-09-11</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">8,866</td><td class="c-no">283</td></tr>
+<tr><td class="c-date">2026-09-10</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">8,860</td><td class="c-no">283</td></tr>
+<tr><td class="c-date">2026-09-09</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">8,852</td><td class="c-no">280</td></tr>
+<tr><td class="c-date">2026-09-08</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">8,702</td><td class="c-no">250</td></tr>
+<tr><td class="c-date">2026-09-07</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">7,319</td><td class="c-no">216</td></tr>
+<tr><td class="c-date">2026-09-06</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">5,982</td><td class="c-no">194</td></tr>
+<tr><td class="c-date">2026-09-05</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">4,614</td><td class="c-no">194</td></tr>
+<tr><td class="c-date">2026-09-04</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">0</td><td class="c-no">4,614</td><td class="c-no">134</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Raw readings: <a href="pulse.ndjson">pulse.ndjson</a>.</p>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Rebuilt 13 September 2026, 11:20 UTC. Dockets from
+       <a href="https://www.courtlistener.com" rel="noopener">CourtListener</a>,
+       a service of the Free Law Project, who neither produced nor endorsed this
+       page. Compilation released under CC0.</p>
+    <p>This is a mirror of federal court dockets, published for research. Case
+       type — including whether a filing is an ADA Title&nbsp;III lawsuit — is our best
+       reading of the court's own nature-of-suit and cause codes, which courts
+       themselves code inconsistently; verify the actual claim on the docket before
+       treating any entry as an ADA matter. A filing shown here may since have been
+       dismissed, settled or otherwise resolved: this record shows what was filed, not
+       current case status.</p>
+    <p>This is not legal advice, not a consumer report under the Fair Credit Reporting
+       Act, and not a credit, insurance, employment, tenancy or background-screening
+       product. Do not use it, or let a tool built on it be used, to make a decision
+       about any individual's or business's eligibility for anything. Court records
+       contain errors — verify against the linked docket before relying on anything
+       here.</p>
+    <p><a href="index.html">The whole record</a> ·
+       <a href="cases.csv">CSV</a> ·
+       <a href="cases.json">JSON</a> ·
+       <a href="feed.xml">RSS</a> ·
+       <a href="pulse.html">Pulse</a></p>
+  </div>
+</footer>
+
+<script src="filter.js" defer></script>
+</body>
+</html>
