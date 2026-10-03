@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://avelikiy.github.io/ada-docket/sitemap.xml
